@@ -1,0 +1,17 @@
+[package]
+name = "sumi-skk"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "An editor-independent SKK engine and Unix CLI"
+
+[lib]
+name = "sumi_skk"
+
+[[bin]]
+name = "skk"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
