@@ -89,3 +89,23 @@ fn high_priority_overlay_preserves_candidates_blocks_and_skipped_counts() {
     assert_eq!(empty.stats().skipped_entries, 2);
     assert_eq!(empty.lookup("かな")[0].text, "仮名");
 }
+
+#[test]
+fn lower_priority_okuri_hints_do_not_override_higher_general_candidates() {
+    fn higher() -> Dictionary {
+        Dictionary::parse("おくr /贈;個人/\n").unwrap()
+    }
+    fn lower() -> Dictionary {
+        Dictionary::parse("おくr /送;一般/[る/送;送りヒント/]/\n").unwrap()
+    }
+    let mut merged = higher();
+    merged.extend(lower());
+    let candidates = merged.lookup_okuri("おくr", "る");
+    assert_eq!(candidates[0].text, "贈");
+    assert_eq!(candidates[0].annotation.as_deref(), Some("個人"));
+    assert_eq!(candidates[1].text, "送");
+    assert_eq!(candidates[1].annotation.as_deref(), Some("送りヒント"));
+    let mut overlaid = lower();
+    overlaid.prepend(higher());
+    assert_eq!(overlaid.lookup_okuri("おくr", "る"), candidates);
+}

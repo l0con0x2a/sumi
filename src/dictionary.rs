@@ -14,10 +14,14 @@ struct Entry {
 }
 impl Entry {
     fn extend(&mut self, lower: Self) {
-        append_unique(&mut self.candidates, lower.candidates);
         for (suffix, candidates) in lower.okuri {
-            append_unique(self.okuri.entry(suffix).or_default(), candidates);
+            let specific = self.okuri.entry(suffix).or_default();
+            // A lower-priority hint must not jump ahead of the higher
+            // dictionary's general candidates for the same okuri key.
+            append_unique(specific, self.candidates.iter().cloned());
+            append_unique(specific, candidates);
         }
+        append_unique(&mut self.candidates, lower.candidates);
     }
 }
 #[derive(Default, Debug)]
