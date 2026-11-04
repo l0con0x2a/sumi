@@ -3,7 +3,7 @@ use std::{
     io::{self, Read, Write},
     process::{Command, Stdio},
 };
-use sumi_skk::{Engine, Key, dictionary::Dictionary};
+use sumi_skk::{Engine, Key, Mode, RomajiRule, dictionary::Dictionary};
 
 // stty is called only on entry/exit; no terminal framework or per-key process.
 struct Terminal {
@@ -73,9 +73,9 @@ fn display_safe(s: &str) -> String {
         .map(|c| if c.is_control() { '�' } else { c })
         .collect()
 }
-pub fn run(dict: &Dictionary) -> io::Result<Option<String>> {
+pub fn run(dict: &Dictionary, rule: RomajiRule) -> io::Result<Option<String>> {
     let mut terminal = Terminal::open()?;
-    let mut engine = Engine::default();
+    let mut engine = Engine::with_romaji_rule(Mode::Hiragana, rule);
     let mut text = String::new();
     let mut message = String::new();
     loop {

@@ -6,6 +6,7 @@ pub mod dictionary;
 pub mod kana;
 pub mod protocol;
 mod romaji;
+pub use romaji::Rule as RomajiRule;
 
 use dictionary::{Candidate, Dictionary};
 use serde::Serialize;
@@ -120,11 +121,13 @@ pub struct Engine {
     mode: Mode,
     composition: Composition,
     pending: String,
+    romaji_rule: RomajiRule,
 }
 /// One event's committed delta plus the complete new preedit and structured state.
 #[derive(Debug, Serialize)]
 pub struct Update {
     pub mode: Mode,
+    pub romaji_rule: RomajiRule,
     pub phase: Phase,
     pub preedit: String,
     pub pending: String,
@@ -146,8 +149,12 @@ impl Default for Engine {
 }
 impl Engine {
     pub fn new(mode: Mode) -> Self {
+        Self::with_romaji_rule(mode, RomajiRule::Skk)
+    }
+    pub fn with_romaji_rule(mode: Mode, romaji_rule: RomajiRule) -> Self {
         Self {
             mode,
+            romaji_rule,
             composition: Composition::Direct,
             pending: String::new(),
         }
@@ -185,6 +192,7 @@ impl Engine {
         };
         Update {
             mode: self.mode,
+            romaji_rule: self.romaji_rule,
             phase,
             preedit,
             pending: self.pending.clone(),
@@ -391,7 +399,11 @@ impl Engine {
                                     text: String::new(),
                                 });
                             }
-                            let kana = romaji::feed(&mut self.pending, c.to_ascii_lowercase());
+                            let kana = romaji::feed(
+                                &mut self.pending,
+                                c.to_ascii_lowercase(),
+                                self.romaji_rule,
+                            );
                             if let Composition::Reading(r) = &mut self.composition {
                                 r.push(&kana);
                                 // Uppercase completing a pending syllable is still part of the stem.

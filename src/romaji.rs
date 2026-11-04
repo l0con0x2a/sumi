@@ -1,4 +1,13 @@
 // Original table. Conversion rules are data, independent of UI and dictionaries.
+/// Double-n behavior. SKK commits nn immediately; common IME-style input keeps
+/// the second n available for a following vowel (konnichiha -> こんにちは).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Rule {
+    #[default]
+    Skk,
+    Common,
+}
 const ROWS: &[(&str, &str)] = &[
     ("", "あいうえお"),
     ("k", "かきくけこ"),
@@ -101,6 +110,51 @@ const EXTRA: &[(&str, &str)] = &[
     ("lyu", "ゅ"),
     ("lyo", "ょ"),
     ("xwa", "ゎ"),
+    ("lwa", "ゎ"),
+    ("xka", "ゕ"),
+    ("xke", "ゖ"),
+    ("ye", "いぇ"),
+    ("wyi", "ゐ"),
+    ("wye", "ゑ"),
+    ("tsa", "つぁ"),
+    ("tsi", "つぃ"),
+    ("tse", "つぇ"),
+    ("tso", "つぉ"),
+    ("tha", "てゃ"),
+    ("thi", "てぃ"),
+    ("thu", "てゅ"),
+    ("the", "てぇ"),
+    ("tho", "てょ"),
+    ("dha", "でゃ"),
+    ("dhi", "でぃ"),
+    ("dhu", "でゅ"),
+    ("dhe", "でぇ"),
+    ("dho", "でょ"),
+    ("twa", "とぁ"),
+    ("twi", "とぃ"),
+    ("twu", "とぅ"),
+    ("twe", "とぇ"),
+    ("two", "とぉ"),
+    ("dwa", "どぁ"),
+    ("dwi", "どぃ"),
+    ("dwu", "どぅ"),
+    ("dwe", "どぇ"),
+    ("dwo", "どぉ"),
+    ("fya", "ふゃ"),
+    ("fyu", "ふゅ"),
+    ("fyo", "ふょ"),
+    ("z,", "‥"),
+    ("z.", "…"),
+    ("z/", "・"),
+    ("z-", "〜"),
+    ("z[", "『"),
+    ("z]", "』"),
+    ("zh", "←"),
+    ("zj", "↓"),
+    ("zk", "↑"),
+    ("zl", "→"),
+    ("[", "「"),
+    ("]", "」"),
     ("-", "ー"),
     (",", "、"),
     (".", "。"),
@@ -117,12 +171,38 @@ fn table() -> &'static Vec<(String, String)> {
                 entries.push((format!("{prefix}{vowel}"), kana.to_string()));
             }
         }
+        for (prefix, base) in [
+            ('k', 'き'),
+            ('g', 'ぎ'),
+            ('s', 'し'),
+            ('z', 'じ'),
+            ('t', 'ち'),
+            ('d', 'ぢ'),
+            ('n', 'に'),
+            ('h', 'ひ'),
+            ('b', 'び'),
+            ('p', 'ぴ'),
+            ('m', 'み'),
+            ('r', 'り'),
+        ] {
+            for (vowel, small) in "aiueo".chars().zip("ゃぃゅぇょ".chars()) {
+                let key = format!("{prefix}y{vowel}");
+                if !entries.iter().any(|(k, _)| *k == key) {
+                    entries.push((key, format!("{base}{small}")));
+                }
+            }
+        }
         entries
     })
 }
 
-pub fn feed(pending: &mut String, c: char) -> String {
+pub fn feed(pending: &mut String, c: char, rule: Rule) -> String {
     let mut output = String::new();
+    if rule == Rule::Skk && pending == "n" && c == 'n' {
+        pending.clear();
+        output.push('ん');
+        return output;
+    }
     // Defer nn until the next key: nni -> んに, nn<Enter> -> ん.
     if pending == "nn" {
         output.push('ん');

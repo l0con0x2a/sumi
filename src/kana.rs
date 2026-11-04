@@ -19,15 +19,29 @@ pub enum Script {
 /// assert_eq!(converter.push("nichiha"), "んにちは");
 /// assert_eq!(converter.finish(), "");
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Converter {
     pending: String,
     script: Script,
+    rule: crate::RomajiRule,
+}
+impl Default for Converter {
+    fn default() -> Self {
+        Self {
+            pending: String::new(),
+            script: Script::Hiragana,
+            rule: crate::RomajiRule::Common,
+        }
+    }
 }
 impl Converter {
     pub fn new(script: Script) -> Self {
+        Self::with_rule(script, crate::RomajiRule::Common)
+    }
+    pub fn with_rule(script: Script, rule: crate::RomajiRule) -> Self {
         Self {
             script,
+            rule,
             ..Self::default()
         }
     }
@@ -42,7 +56,11 @@ impl Converter {
     pub fn push(&mut self, input: &str) -> String {
         let mut output = String::new();
         for c in input.chars() {
-            output.push_str(&romaji::feed(&mut self.pending, c.to_ascii_lowercase()));
+            output.push_str(&romaji::feed(
+                &mut self.pending,
+                c.to_ascii_lowercase(),
+                self.rule,
+            ));
         }
         self.render(&output)
     }

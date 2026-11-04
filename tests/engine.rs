@@ -10,7 +10,7 @@ fn kana_and_pending() {
     for (input, expected) in [
         ("ka", "か"),
         ("shi", "し"),
-        ("konnichiha", "こんにちは"),
+        ("kon'nichiha", "こんにちは"),
         ("gakkou", "がっこう"),
         ("kanpai", "かんぱい"),
         ("shin'you", "しんよう"),

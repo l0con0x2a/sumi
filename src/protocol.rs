@@ -33,7 +33,15 @@ pub fn respond(engine: &mut Engine, dict: &Dictionary, line: &str) -> Value {
     }
 }
 pub fn serve(input: impl BufRead, mut output: impl Write, dict: &Dictionary) -> io::Result<()> {
-    let mut engine = Engine::default();
+    serve_with_engine(input, &mut output, dict, Engine::default())
+}
+/// Run a session with a caller-configured, independently owned engine.
+pub fn serve_with_engine(
+    input: impl BufRead,
+    mut output: impl Write,
+    dict: &Dictionary,
+    mut engine: Engine,
+) -> io::Result<()> {
     // Bound each frame, including malformed input, to avoid unbounded allocation.
     let mut input = input;
     loop {

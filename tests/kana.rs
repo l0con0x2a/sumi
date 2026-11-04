@@ -44,3 +44,24 @@ fn katakana_and_trailing_pending() {
     assert_eq!(c.push("ky"), "");
     assert_eq!(c.finish(), "ky");
 }
+
+#[test]
+fn extended_syllables_and_skk_symbols() {
+    for (keys, expected) in [
+        ("thi", "てぃ"),
+        ("twu", "とぅ"),
+        ("tsa", "つぁ"),
+        ("dhi", "でぃ"),
+        ("kyi", "きぃ"),
+        ("nye", "にぇ"),
+        ("xke", "ゖ"),
+        ("[zhzjzkzl]", "「←↓↑→」"),
+    ] {
+        let mut c = Converter::default();
+        assert_eq!(
+            format!("{}{}", c.push(keys), c.finish()),
+            expected,
+            "{keys}"
+        );
+    }
+}

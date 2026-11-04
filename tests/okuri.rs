@@ -92,3 +92,15 @@ fn mode_switch_flushes_pending_n_and_ctrl_j_confirms() {
     assert!(e.process_key(Key::Char('\n'), &d).error.is_some());
     assert!(e.is_idle());
 }
+
+#[test]
+fn standard_nn_commits_immediately_and_common_mode_is_explicit() {
+    let d = Dictionary::demo();
+    let mut skk = Engine::default();
+    assert_eq!(input(&mut skk, &d, "nn"), "ん");
+    assert!(skk.is_idle());
+    assert_eq!(input(&mut skk, &d, "i"), "い");
+    let mut common = Engine::with_romaji_rule(Mode::Hiragana, sumi_skk::RomajiRule::Common);
+    assert_eq!(input(&mut common, &d, "konnichiha"), "こんにちは");
+    assert_eq!(common.snapshot().romaji_rule, sumi_skk::RomajiRule::Common);
+}

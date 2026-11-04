@@ -120,3 +120,26 @@ fn json_search_and_dictionary_priority() {
     assert_eq!(candidates[1]["annotation"], serde_json::Value::Null);
     assert_eq!(candidates[2]["text"], "幹事");
 }
+
+#[test]
+fn kana_supports_explicit_skk_and_common_rules() {
+    let skk_result = skk()
+        .args(["kana", "--romaji", "skk", "nni"])
+        .output()
+        .unwrap();
+    let common_result = skk()
+        .args(["kana", "--romaji", "common", "nni"])
+        .output()
+        .unwrap();
+    assert_eq!(skk_result.stdout, "んい\n".as_bytes());
+    assert_eq!(common_result.stdout, "んに\n".as_bytes());
+    assert_eq!(
+        skk()
+            .args(["kana", "--romaji", "invalid"])
+            .output()
+            .unwrap()
+            .status
+            .code(),
+        Some(2)
+    );
+}

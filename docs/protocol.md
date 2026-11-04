@@ -1,6 +1,7 @@
 # stdio protocol v0 (MVP)
 
 `skk serve --stdio` はプロセスごとに独立したひらがな状態を作る。
+既定のローマ字規則は標準 SKK の `nn → ん` で、`--romaji common` なら後半の `n` を保留する。
 1つのUTF-8 JSONオブジェクトを1行で送り、同じ順番で1行のJSON応答を受け取る。
 要求ごとにflushする。stdoutにログを混ぜない。EOFで終了し、状態は保存しない。
 アプリごとにプロセスを起動する方式で、1プロセスの複数クライアント共有はしない。
@@ -43,6 +44,7 @@
 |resultのフィールド|定義|
 |---|---|
 |mode|`ascii` / `hiragana` / `katakana`|
+|romaji_rule|`skk` / `common`。セッションの起動時に指定した規則|
 |phase|`direct` / `composing` / `selecting_candidates`|
 |preedit|その時点での未確定表示全体（▽/▼を含む）。差分ではない|
 |pending|未確定のローマ字。表示の解析をせずに取得できる|

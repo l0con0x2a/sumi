@@ -7,6 +7,7 @@ use std::{
     process::ExitCode,
 };
 use sumi_skk::{
+    Engine, Mode, RomajiRule,
     dictionary::Dictionary,
     kana::{Converter, Script},
     protocol,
@@ -22,6 +23,8 @@ Usage:
   skk tui [--dict FILE]...
   skk --help
   skk --version
+
+--romaji skk|common selects double-n behavior (kana: common; serve/tui: skk).
 
 kana:    Transliterate literal romaji; read UTF-8 stdin when TEXT is omitted.
 convert: Print dictionary candidates, one per line; --json includes annotations.
@@ -43,6 +46,7 @@ struct Options {
     dictionaries: Vec<PathBuf>,
     json: bool,
     katakana: bool,
+    romaji: Option<RomajiRule>,
 }
 fn options(args: impl Iterator<Item = String>) -> io::Result<Options> {
     let mut options = Options::default();
@@ -59,6 +63,13 @@ fn options(args: impl Iterator<Item = String>) -> io::Result<Options> {
             }
             "--json" if !positional => options.json = true,
             "--katakana" if !positional => options.katakana = true,
+            "--romaji" if !positional => {
+                options.romaji = Some(match args.next().as_deref() {
+                    Some("skk") => RomajiRule::Skk,
+                    Some("common") => RomajiRule::Common,
+                    _ => return Err(usage("--romaji requires skk or common")),
+                });
+            }
             "--stdio" if !positional => options.words.push(arg),
             _ if !positional && arg.starts_with('-') => {
                 return Err(usage(format!("unknown option: {arg}")));
@@ -86,8 +97,8 @@ fn dictionaries(paths: &[PathBuf]) -> io::Result<Dictionary> {
     }
     Ok(dictionary)
 }
-fn kana(text: Option<&String>, script: Script) -> io::Result<()> {
-    let mut converter = Converter::new(script);
+fn kana(text: Option<&String>, script: Script, rule: RomajiRule) -> io::Result<()> {
+    let mut converter = Converter::with_rule(script, rule);
     let mut out = io::stdout().lock();
     if let Some(text) = text {
         write!(out, "{}{}", converter.push(text), converter.finish())?;
@@ -126,9 +137,10 @@ fn run() -> io::Result<()> {
                 } else {
                     Script::Hiragana
                 },
+                options.romaji.unwrap_or(RomajiRule::Common),
             )
         }
-        "convert" if !options.katakana && options.words.len() == 1 => {
+        "convert" if !options.katakana && options.romaji.is_none() && options.words.len() == 1 => {
             let dictionary = dictionaries(&options.dictionaries)?;
             let candidates = dictionary.lookup(&options.words[0]);
             let mut out = io::stdout().lock();
@@ -145,6 +157,7 @@ fn run() -> io::Result<()> {
         "check-dict"
             if !options.katakana
                 && !options.json
+                && options.romaji.is_none()
                 && options.dictionaries.is_empty()
                 && options.words.len() == 1 =>
         {
@@ -154,14 +167,18 @@ fn run() -> io::Result<()> {
             writeln!(out)
         }
         "serve" if !options.json && !options.katakana && options.words == ["--stdio"] => {
-            protocol::serve(
+            protocol::serve_with_engine(
                 io::stdin().lock(),
                 io::stdout().lock(),
                 &dictionaries(&options.dictionaries)?,
+                Engine::with_romaji_rule(Mode::Hiragana, options.romaji.unwrap_or_default()),
             )
         }
         "tui" if !options.json && !options.katakana && options.words.is_empty() => {
-            if let Some(text) = terminal::run(&dictionaries(&options.dictionaries)?)? {
+            if let Some(text) = terminal::run(
+                &dictionaries(&options.dictionaries)?,
+                options.romaji.unwrap_or_default(),
+            )? {
                 io::stdout().lock().write_all(text.as_bytes())?;
             }
             Ok(())
