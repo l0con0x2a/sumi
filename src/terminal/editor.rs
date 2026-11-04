@@ -18,6 +18,9 @@ impl Draft {
         self.text
     }
     pub fn insert(&mut self, value: &str) {
+        if value.is_empty() {
+            return;
+        }
         self.text.insert_str(self.cursor, value);
         self.cursor += value.len();
         self.normalize_cursor();
