@@ -417,8 +417,11 @@ impl Engine {
                         committed.push(c);
                     } else if matches!(self.composition, Composition::Direct)
                         && (c == 'q' || c == 'l')
+                        && !romaji::has_rule(&self.pending, c)
                     {
-                        committed = self.mode.render(&romaji::flush(&mut self.pending));
+                        committed = self
+                            .mode
+                            .render(&romaji::flush_mode_change(&mut self.pending));
                         self.mode = if c == 'l' {
                             Mode::Ascii
                         } else if self.mode == Mode::Hiragana {

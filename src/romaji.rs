@@ -251,6 +251,19 @@ pub fn feed(pending: &mut String, c: char, rule: Rule) -> String {
     }
     output
 }
+pub fn has_rule(pending: &str, c: char) -> bool {
+    let mut key = pending.to_owned();
+    key.push(c);
+    table().iter().any(|(candidate, _)| *candidate == key)
+}
+pub fn flush_mode_change(pending: &mut String) -> String {
+    if pending == "n" || pending == "nn" {
+        flush(pending)
+    } else {
+        pending.clear();
+        String::new()
+    }
+}
 
 pub fn flush(pending: &mut String) -> String {
     if pending == "n" || pending == "nn" {
