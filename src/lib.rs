@@ -26,6 +26,7 @@ impl Key {
     pub fn parse(s: &str) -> Result<Self, String> {
         Ok(match s {
             "Space" => Self::Space,
+            "Apostrophe" => Self::Char('\''),
             "Enter" => Self::Enter,
             "Escape" => Self::Escape,
             "Backspace" => Self::Backspace,
