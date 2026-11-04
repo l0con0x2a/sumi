@@ -143,6 +143,10 @@ fn lock_contention_reports_failure_without_losing_the_commit() {
 #[test]
 fn corrupt_or_unsupported_data_is_never_overwritten() {
     let directory = Directory::new();
+    let invalid_path = directory.0.join("invalid/user.skk");
+    let (invalid_store, _) = UserDictionary::open(&invalid_path).unwrap();
+    assert!(invalid_store.record(&choice("かな", "", None)).is_err());
+    assert!(!invalid_path.parent().unwrap().exists());
     let path = directory.path();
     let (store, _) = UserDictionary::open(&path).unwrap();
     for data in ["broken", "abc /abbreviation/\n", "かな /(eval \"code\")/\n"] {

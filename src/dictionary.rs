@@ -54,6 +54,27 @@ fn supported_reading(reading: &str) -> bool {
     };
     !stem.is_empty() && stem.chars().all(|c| !c.is_ascii() && !c.is_control())
 }
+pub(crate) fn validate_entry(
+    reading: &str,
+    candidate: &Candidate,
+    okuri: Option<&str>,
+) -> Result<(), String> {
+    if !supported_reading(reading)
+        || (okuri.is_some() && !reading.ends_with(|c: char| c.is_ascii_lowercase()))
+        || candidate.text.is_empty()
+        || candidate.text.chars().any(char::is_control)
+        || candidate
+            .annotation
+            .as_ref()
+            .is_some_and(|s| s.chars().any(char::is_control))
+        || okuri
+            .is_some_and(|s| s.is_empty() || s.chars().any(|c| c.is_control() || "/[]".contains(c)))
+    {
+        Err("invalid reading, candidate or okuri".into())
+    } else {
+        Ok(())
+    }
+}
 
 // Split only outside parenthesized expressions, including quoted slash/semicolon.
 fn split_outside(input: &str, delimiter: char) -> Result<Vec<&str>, String> {
@@ -311,20 +332,7 @@ impl Dictionary {
         candidate: Candidate,
         okuri: Option<&str>,
     ) -> Result<(), String> {
-        if !supported_reading(reading)
-            || (okuri.is_some() && !reading.ends_with(|c: char| c.is_ascii_lowercase()))
-            || candidate.text.is_empty()
-            || candidate.text.chars().any(char::is_control)
-            || candidate
-                .annotation
-                .as_ref()
-                .is_some_and(|s| s.chars().any(char::is_control))
-            || okuri.is_some_and(|s| {
-                s.is_empty() || s.chars().any(|c| c.is_control() || "/[]".contains(c))
-            })
-        {
-            return Err("invalid reading, candidate or okuri".into());
-        }
+        validate_entry(reading, &candidate, okuri)?;
         let entry = self.entries.entry(reading.into()).or_default();
         let promote = |list: &mut Vec<Candidate>| {
             list.retain(|c| c.text != candidate.text);

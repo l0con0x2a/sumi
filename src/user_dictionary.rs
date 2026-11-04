@@ -92,6 +92,12 @@ impl UserDictionary {
     /// Reload while holding a stable sidecar lock, then atomically replace the
     /// file. A busy lock returns WouldBlock rather than stalling key processing.
     pub fn record(&self, confirmed: &Confirmed) -> io::Result<()> {
+        crate::dictionary::validate_entry(
+            &confirmed.dictionary_key,
+            &confirmed.candidate,
+            confirmed.okuri.as_deref(),
+        )
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
         let parent = self.path.parent().expect("absolute path has a parent");
         fs::create_dir_all(parent)?;
         let mut options = OpenOptions::new();
