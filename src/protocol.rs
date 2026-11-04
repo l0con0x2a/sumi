@@ -7,10 +7,18 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
+/// Version of the public JSON Lines envelope and request/response contract.
+pub const VERSION: u32 = 1;
+fn versioned(mut reply: Value) -> Value {
+    reply["version"] = json!(VERSION);
+    reply
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
     id: Value,
+    version: Option<u32>,
     op: Option<String>,
     key: Option<String>,
     index: Option<usize>,
@@ -93,6 +101,11 @@ fn parse(line: &str) -> Result<(Value, Action), Value> {
             json!({"id":id,"error":{"code":"invalid_request","message":"id must be a string or unsigned integer"}}),
         );
     }
+    if req.version.is_some_and(|version| version != VERSION) {
+        return Err(
+            json!({"id":id,"error":{"code":"unsupported_version","message":"supported protocol version is 1"}}),
+        );
+    }
     let action = req
         .action()
         .map_err(|(code, message)| json!({"id":id,"error":{"code":code,"message":message}}))?;
@@ -116,13 +129,13 @@ fn execute(engine: &mut Engine, dict: &Dictionary, action: Action) -> Update {
 }
 // Invalid requests are fully checked before any input state changes.
 pub fn respond(engine: &mut Engine, dict: &Dictionary, line: &str) -> Value {
-    match parse(line) {
+    versioned(match parse(line) {
         Ok((id, action)) => json!({"id":id,"result":execute(engine,dict,action)}),
         Err(error) => error,
-    }
+    })
 }
 pub fn respond_session(session: &mut Session, line: &str) -> Value {
-    match parse(line) {
+    versioned(match parse(line) {
         Ok((id, action)) => {
             if let Action::Register {
                 reading,
@@ -130,13 +143,15 @@ pub fn respond_session(session: &mut Session, line: &str) -> Value {
                 okuri,
             } = action
             {
-                return json!({"id":id,"result":session.register(&reading, Candidate { text, annotation: None }, okuri.as_deref())});
+                return versioned(
+                    json!({"id":id,"result":session.register(&reading, Candidate { text, annotation: None }, okuri.as_deref())}),
+                );
             }
             let update = execute(&mut session.engine, &session.dictionary, action);
             json!({"id":id,"result":session.learn(update)})
         }
         Err(error) => error,
-    }
+    })
 }
 pub fn serve(input: impl BufRead, mut output: impl Write, dict: &Dictionary) -> io::Result<()> {
     serve_with_engine(input, &mut output, dict, Engine::default())
@@ -202,7 +217,7 @@ fn stream(
                 }
             }
         };
-        serde_json::to_writer(&mut output, &response)?;
+        serde_json::to_writer(&mut output, &versioned(response))?;
         writeln!(output)?;
         output.flush()?;
     }

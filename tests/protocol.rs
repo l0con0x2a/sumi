@@ -73,3 +73,16 @@ fn session_registration_preserves_preedit_and_makes_words_available() {
             .is_object()
     );
 }
+
+#[test]
+fn protocol_version_is_explicit_and_mismatches_do_not_change_state() {
+    let mut engine = Engine::default();
+    let reply = request(&mut engine, json!({"id":1,"version":1,"key":"K"}));
+    assert_eq!(reply["version"], 1);
+    assert_eq!(reply["result"]["preedit"], "▽k");
+    let rejected = request(&mut engine, json!({"id":2,"version":999,"key":"a"}));
+    assert_eq!(rejected["version"], 1);
+    assert_eq!(rejected["error"]["code"], "unsupported_version");
+    assert_eq!(engine.snapshot().preedit, "▽k");
+    assert_eq!(respond(&mut engine, &Dictionary::demo(), "{")["version"], 1);
+}

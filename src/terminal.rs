@@ -119,9 +119,16 @@ pub fn run(mut session: Session) -> io::Result<Option<String>> {
         if dirty {
             if let Some(registration) = &registration {
                 let state = session.snapshot();
+                let reading = format!(
+                    "{}{}",
+                    state.reading.unwrap_or_default(),
+                    state
+                        .okuri
+                        .map_or(String::new(), |suffix| format!("*{suffix}"))
+                );
                 let title = format!(
                     "Register {}{}  Enter: register  Esc: back",
-                    state.dictionary_key.unwrap_or_default(),
+                    reading,
                     if session.has_user_dictionary() {
                         ""
                     } else {
