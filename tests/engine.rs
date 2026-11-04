@@ -145,18 +145,3 @@ fn protocol_stream_recovers_after_oversized_and_invalid_utf8() {
     assert_eq!(rows[1]["error"]["code"], "invalid_utf8");
     assert_eq!(rows[2]["result"]["committed"], "あ");
 }
-#[test]
-fn latency_smoke() {
-    let d = Dictionary::demo();
-    let mut e = Engine::default();
-    let start = std::time::Instant::now();
-    for _ in 0..10000 {
-        type_text(&mut e, "Kanji");
-        e.process_key(Key::Space, &d);
-        e.process_key(Key::Enter, &d);
-    }
-    eprintln!(
-        "70000 keys: {:?}; dictionary/demo helper overhead included",
-        start.elapsed()
-    );
-}

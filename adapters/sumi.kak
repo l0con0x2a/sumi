@@ -5,12 +5,19 @@ declare-option -hidden str skk_directory ''
 declare-option -hidden str skk_client ''
 define-command -override skk-start %{
     evaluate-commands %sh{
+        if [ -n "$kak_opt_skk_directory" ]; then
+            printf "fail 'SKK is already active'\n"; exit
+        fi
+        case "$kak_client" in
+            ''|*[!A-Za-z0-9_-]*) printf "fail 'SKK prototype requires a simple client name'\n"; exit;;
+        esac
         umask 077
-        directory=$(mktemp -d "${TMPDIR:-/tmp}/sumi-kak.XXXXXXXX") || exit
+        directory=$(mktemp -d /tmp/sumi-kak.XXXXXXXX) || exit
         mkfifo "$directory/keys" "$directory/notify" || exit
         skk kakoune "$directory" </dev/null >"$directory/log" 2>&1 &
         printf "set-option window skk_directory '%s'\n" "$directory"
         printf "set-option window skk_client '%s'\n" "$kak_client"
+        printf "hook -group skk-%s global ClientClose '%s' %%{ try %%{ echo -to-file '%s/keys' -- __STOP__ %%opt{skk_newline} } }\n" "$kak_client" "$kak_client" "$directory"
         printf "evaluate-commands -draft %%{ edit -fifo '%s/notify' '*skk-%s*'; hook buffer BufReadFifo .* %%{ evaluate-commands -client '%s' %%{ evaluate-commands %%file{%s/reply}; echo -to-file '%s/keys' -- __ACK__ %%opt{skk_newline} } } }\n" "$directory" "$kak_client" "$kak_client" "$directory" "$directory"
         for key in a b c d e f g h i j k l m n o p q r s t u v w x y z 0 1 2 3 4 5 6 7 8 9 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z; do
             printf "map window insert %s '<a-;>:echo -to-file %s/keys -- %s %%opt{skk_newline}<ret>'\n" "$key" "$directory" "$key"
@@ -35,6 +42,7 @@ define-command -override -hidden skk-cleanup %{
     remove-hooks window skk
     evaluate-commands %sh{
         [ -n "$kak_opt_skk_directory" ] || exit
+        printf 'remove-hooks global skk-%s\n' "$kak_client"
         for key in a b c d e f g h i j k l m n o p q r s t u v w x y z 0 1 2 3 4 5 6 7 8 9 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z '<space>' '<ret>' '<backspace>' '<c-j>' '<c-g>' '<esc>' '<c-k>' '<minus>' ',' '.' '<quote>' '<left>' '<right>' '<up>' '<down>'; do
             printf 'unmap window insert %s\n' "$key"
         done

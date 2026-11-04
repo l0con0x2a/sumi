@@ -63,4 +63,19 @@ tmux -L "$socket" load-buffer -b sumi-test "$work/expected"
 tmux -L "$socket" paste-buffer -d -b sumi-test -t "$pane"
 sleep 0.1
 tmux -L "$socket" capture-pane -p -t "$pane" | rg -q '漢字'
+# Closing the editor while SKK is active must terminate and clean up the bridge.
+tmux -L "$socket" select-window -t check:0
+tmux -L "$socket" send-keys -t check:0 i C-k
+wait_screen 'SKK on'
+kak_cmd "echo -to-file $work/directory %opt{skk_directory}"
+sleep 0.1
+directory=$(cat "$work/directory")
+[ -d "$directory" ]
+kak_cmd 'quit!'
+count=0
+while [ -d "$directory" ]; do
+    count=$((count+1))
+    [ "$count" -lt 100 ] || { echo 'Kakoune bridge leaked' >&2; exit 1; }
+    sleep 0.05
+done
 printf 'Kakoune conversion, burst/exit, multiple selections, TUI and tmux transport: OK\n'

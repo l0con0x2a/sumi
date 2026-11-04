@@ -12,4 +12,4 @@ skk tui > "$file"
 [ -s "$file" ] || exit 0
 # IDs are stable: a destroyed target is an error, never a fallback to active pane.
 tmux load-buffer -b "$name" "$file"
-tmux paste-buffer -d -b "$name" -t "$pane"
+tmux paste-buffer -p -d -b "$name" -t "$pane"
