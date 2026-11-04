@@ -1,3 +1,4 @@
+#[cfg(all(unix, feature = "terminal"))]
 mod terminal;
 
 use std::{
@@ -117,7 +118,13 @@ fn kana(text: Option<&String>, script: Script, rule: RomajiRule) -> io::Result<(
 }
 fn run() -> io::Result<()> {
     let args: Vec<_> = env::args().skip(1).collect();
-    if args.is_empty() || args.iter().any(|s| s == "--help" || s == "-h") || args == ["help"] {
+    if args.is_empty()
+        || args
+            .iter()
+            .take_while(|s| s.as_str() != "--")
+            .any(|s| s == "--help" || s == "-h")
+        || args == ["help"]
+    {
         return io::stdout().lock().write_all(HELP.as_bytes());
     }
     if args == ["--version"] {
@@ -175,13 +182,21 @@ fn run() -> io::Result<()> {
             )
         }
         "tui" if !options.json && !options.katakana && options.words.is_empty() => {
-            if let Some(text) = terminal::run(
-                &dictionaries(&options.dictionaries)?,
-                options.romaji.unwrap_or_default(),
-            )? {
-                io::stdout().lock().write_all(text.as_bytes())?;
+            #[cfg(all(unix, feature = "terminal"))]
+            {
+                if let Some(text) = terminal::run(
+                    &dictionaries(&options.dictionaries)?,
+                    options.romaji.unwrap_or_default(),
+                )? {
+                    io::stdout().lock().write_all(text.as_bytes())?;
+                }
+                Ok(())
             }
-            Ok(())
+            #[cfg(not(all(unix, feature = "terminal")))]
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "tui requires Unix and the terminal feature",
+            ))
         }
         "convert" | "serve" | "tui" | "check-dict" => Err(usage(format!(
             "invalid arguments for {command}; see skk --help"
@@ -195,6 +210,10 @@ fn main() -> ExitCode {
         Err(error) if error.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("skk: {error}");
+            #[cfg(all(unix, feature = "terminal"))]
+            if let Some(signal) = terminal::interrupted_signal() {
+                return ExitCode::from(128 + signal as u8);
+            }
             ExitCode::from(if error.kind() == io::ErrorKind::InvalidInput {
                 2
             } else {

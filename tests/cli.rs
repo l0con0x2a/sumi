@@ -143,3 +143,10 @@ fn kana_supports_explicit_skk_and_common_rules() {
         Some(2)
     );
 }
+
+#[test]
+fn option_terminator_preserves_help_as_a_literal_reading() {
+    let output = skk().args(["convert", "--", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+}
