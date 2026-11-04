@@ -68,13 +68,11 @@ fn mode_switch_and_n_flush() {
     assert_eq!(type_text(&mut e, "ka"), "か");
 }
 #[test]
-fn no_candidate_and_unsupported_okuri_do_not_destroy_state() {
+fn no_candidate_does_not_destroy_state() {
     let d = Dictionary::demo();
     let mut e = Engine::default();
     type_text(&mut e, "Mumei");
     assert!(e.process_key(Key::Space, &d).error.is_some());
-    assert_eq!(e.snapshot().preedit, "▽むめい");
-    assert!(e.process_key(Key::Char('K'), &d).error.is_some());
     assert_eq!(e.snapshot().preedit, "▽むめい");
     assert_eq!(e.process_key(Key::Enter, &d).committed, "むめい");
 }

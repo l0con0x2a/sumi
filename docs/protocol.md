@@ -45,6 +45,10 @@
 |mode|`ascii` / `hiragana` / `katakana`|
 |phase|`direct` / `composing` / `selecting_candidates`|
 |preedit|その時点での未確定表示全体（▽/▼を含む）。差分ではない|
+|pending|未確定のローマ字。表示の解析をせずに取得できる|
+|reading|ひらがなの語幹。直接入力ではnull|
+|okuri|確定した送り仮名のかな。送り入力中は空文字列、送りなしではnull|
+|dictionary_key|送りキーの英字を含む見出し語。直接入力ではnull|
 |committed|そのキーが確定した文字列の差分。重複適用しない|
 |candidates|候補本文textと任意のannotation。選択中以外は空配列|
 |candidate_index|0始まりの選択番号。選択中以外はnull|
@@ -71,4 +75,10 @@
 入出力のI/Oエラーはstderrへ診断して非0終了する。
 
 このプロトコルはMVP版で、拡張時の互換性方針やバージョンネゴシエーションは今後定義する。
-Kakoune用のFIFOはアダプタ内部実装であり、この公開プロトコルとは別である。
+クライアントは追加された応答フィールドを無視できるようにする。
+
+送り仮名付き入力では、たとえば `O k u R u` で見出し語 `おくr` を検索する。
+かなが完成すると Space を待たず候補選択へ進む。
+`reading` は `おく`、`okuri` は `る`、`dictionary_key` は `おくr` となる。
+候補配列の本文は語幹だけで、`preedit` と確定差分には送り仮名も含む。
+Ctrl-G で候補から読みに戻った場合も、送り仮名を保持する。
