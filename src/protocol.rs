@@ -7,7 +7,37 @@ use std::io::{self, BufRead, Write};
 #[serde(deny_unknown_fields)]
 struct Request {
     id: Value,
-    key: String,
+    op: Option<String>,
+    key: Option<String>,
+    index: Option<usize>,
+}
+enum Action {
+    Key(Key),
+    State,
+    Reset,
+    Commit,
+    Select(usize),
+}
+impl Request {
+    fn action(&self) -> Result<Action, (&'static str, String)> {
+        match (
+            self.op.as_deref().unwrap_or("key"),
+            self.key.as_deref(),
+            self.index,
+        ) {
+            ("key", Some(key), None) => Key::parse(key)
+                .map(Action::Key)
+                .map_err(|e| ("invalid_key", e)),
+            ("state", None, None) => Ok(Action::State),
+            ("reset", None, None) => Ok(Action::Reset),
+            ("commit", None, None) => Ok(Action::Commit),
+            ("select", None, Some(index)) => Ok(Action::Select(index)),
+            _ => Err((
+                "invalid_request",
+                "expected key, state, reset, commit, or select with the matching fields".into(),
+            )),
+        }
+    }
 }
 // A process owns exactly one session. Invalid requests never change engine state.
 pub fn respond(engine: &mut Engine, dict: &Dictionary, line: &str) -> Value {
@@ -27,10 +57,18 @@ pub fn respond(engine: &mut Engine, dict: &Dictionary, line: &str) -> Value {
     if !req.id.is_string() && !req.id.is_u64() {
         return json!({"id":id,"error":{"code":"invalid_request","message":"id must be a string or unsigned integer"}});
     }
-    match Key::parse(&req.key) {
-        Ok(key) => json!({"id":req.id,"result":engine.process_key(key, dict)}),
-        Err(e) => json!({"id":id,"error":{"code":"invalid_key","message":e}}),
-    }
+    let result = match req.action() {
+        Ok(Action::Key(key)) => engine.process_key(key, dict),
+        Ok(Action::State) => engine.snapshot(),
+        Ok(Action::Reset) => {
+            engine.reset();
+            engine.snapshot()
+        }
+        Ok(Action::Commit) => engine.commit(dict),
+        Ok(Action::Select(index)) => engine.select_candidate(index),
+        Err((code, message)) => return json!({"id":id,"error":{"code":code,"message":message}}),
+    };
+    json!({"id":req.id,"result":result})
 }
 pub fn serve(input: impl BufRead, mut output: impl Write, dict: &Dictionary) -> io::Result<()> {
     serve_with_engine(input, &mut output, dict, Engine::default())

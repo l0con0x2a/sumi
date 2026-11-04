@@ -209,6 +209,34 @@ impl Engine {
     pub fn is_idle(&self) -> bool {
         matches!(self.composition, Composition::Direct) && self.pending.is_empty()
     }
+    /// Commit composition without interpreting idle Enter as an application key.
+    pub fn commit(&mut self, dictionary: &Dictionary) -> Update {
+        if self.is_idle() {
+            self.snapshot()
+        } else {
+            self.process_key(Key::Enter, dictionary)
+        }
+    }
+    /// Choose a zero-based candidate without confirming it.
+    /// Invalid indices leave the selection intact and report an operation error.
+    pub fn select_candidate(&mut self, index: usize) -> Update {
+        let error = match &mut self.composition {
+            Composition::Selecting {
+                candidates,
+                index: current,
+                ..
+            } if index < candidates.len() => {
+                *current = index;
+                None
+            }
+            Composition::Selecting { .. } => Some("candidate index out of range".into()),
+            _ => Some("candidate selection requires an active conversion".into()),
+        };
+        Update {
+            error,
+            ..self.snapshot()
+        }
+    }
     fn lookup(&mut self, dictionary: &Dictionary) -> Option<String> {
         let Composition::Reading(reading) = std::mem::take(&mut self.composition) else {
             unreachable!("lookup is only called during composition");

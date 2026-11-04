@@ -139,6 +139,8 @@ skk serve --stdio
 
 応答では、確定した差分 `committed` と未確定表示全体 `preedit` を分けます。
 候補、選択番号、呼出元で処理するキー、エラーも別のフィールドで返します。
+`state`、`reset`、`select`、`commit` の操作も用意しています。
+呼出元は候補を選ぶために Space を繰り返し送ったり、表示文字列を解析したりする必要がありません。
 [通信仕様](docs/protocol.md) に要求と応答の定義を記載しています。
 
 Rust からは `Engine::process_key(Key, &Dictionary) -> Update` を使えます。
