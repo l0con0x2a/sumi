@@ -195,3 +195,33 @@ fn symlink_targets_are_updated_without_replacing_the_symlink() {
     fs::remove_file(&target).unwrap();
     assert!(UserDictionary::open(&link).is_err());
 }
+
+#[test]
+fn registration_of_the_current_word_commits_okuri_and_keeps_errors_editable() {
+    let directory = Directory::new();
+    let mut session =
+        Session::with_user_dictionary(Engine::default(), Dictionary::default(), directory.path())
+            .unwrap();
+    type_text(&mut session, "OkuRu");
+    assert!(session.snapshot().preedit.starts_with('▽'));
+    let invalid = session.register_current(Candidate {
+        text: "bad\nword".into(),
+        annotation: None,
+    });
+    assert!(invalid.error.is_some());
+    assert_eq!(session.snapshot().preedit, "▽おく*る");
+    let update = session.register_current(Candidate {
+        text: "贈".into(),
+        annotation: None,
+    });
+    assert_eq!(update.committed, "贈る");
+    assert!(update.learning_error.is_none());
+    assert!(session.is_idle());
+    assert_eq!(
+        Dictionary::load(directory.path())
+            .unwrap()
+            .lookup_okuri("おくr", "る")[0]
+            .text,
+        "贈"
+    );
+}

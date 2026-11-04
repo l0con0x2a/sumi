@@ -1,4 +1,8 @@
-use crate::{Engine, Key, Update, dictionary::Dictionary, session::Session};
+use crate::{
+    Engine, Key, Update,
+    dictionary::{Candidate, Dictionary},
+    session::Session,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
@@ -10,6 +14,9 @@ struct Request {
     op: Option<String>,
     key: Option<String>,
     index: Option<usize>,
+    reading: Option<String>,
+    text: Option<String>,
+    okuri: Option<String>,
 }
 enum Action {
     Key(Key),
@@ -17,9 +24,33 @@ enum Action {
     Reset,
     Commit,
     Select(usize),
+    Register {
+        reading: String,
+        text: String,
+        okuri: Option<String>,
+    },
 }
 impl Request {
     fn action(&self) -> Result<Action, (&'static str, String)> {
+        if self.op.as_deref() == Some("register") {
+            return match (&self.reading, &self.text, &self.key, self.index) {
+                (Some(reading), Some(text), None, None) => Ok(Action::Register {
+                    reading: reading.clone(),
+                    text: text.clone(),
+                    okuri: self.okuri.clone(),
+                }),
+                _ => Err((
+                    "invalid_request",
+                    "register requires reading and text, with optional okuri".into(),
+                )),
+            };
+        }
+        if self.reading.is_some() || self.text.is_some() || self.okuri.is_some() {
+            return Err((
+                "invalid_request",
+                "registration fields require op:register".into(),
+            ));
+        }
         match (
             self.op.as_deref().unwrap_or("key"),
             self.key.as_deref(),
@@ -77,6 +108,10 @@ fn execute(engine: &mut Engine, dict: &Dictionary, action: Action) -> Update {
         }
         Action::Commit => engine.commit(dict),
         Action::Select(index) => engine.select_candidate(index),
+        Action::Register { .. } => Update {
+            error: Some("registration requires a Session".into()),
+            ..engine.snapshot()
+        },
     }
 }
 // Invalid requests are fully checked before any input state changes.
@@ -89,6 +124,14 @@ pub fn respond(engine: &mut Engine, dict: &Dictionary, line: &str) -> Value {
 pub fn respond_session(session: &mut Session, line: &str) -> Value {
     match parse(line) {
         Ok((id, action)) => {
+            if let Action::Register {
+                reading,
+                text,
+                okuri,
+            } = action
+            {
+                return json!({"id":id,"result":session.register(&reading, Candidate { text, annotation: None }, okuri.as_deref())});
+            }
             let update = execute(&mut session.engine, &session.dictionary, action);
             json!({"id":id,"result":session.learn(update)})
         }

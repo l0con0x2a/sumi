@@ -120,9 +120,9 @@ impl Terminal {
     }
     pub fn suspend(&mut self) -> io::Result<()> {
         self.restore();
-        // SAFETY: stop this process only after restoring the terminal. Execution
-        // continues here after SIGCONT, and the draft remains in memory.
-        if unsafe { libc::raise(libc::SIGSTOP) } != 0 {
+        // SAFETY: restore first, then stop the foreground job's process group,
+        // so shell pipelines suspend together. SIGCONT resumes with the draft.
+        if unsafe { libc::kill(0, libc::SIGSTOP) } != 0 {
             return Err(io::Error::last_os_error());
         }
         self.activate()?;

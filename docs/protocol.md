@@ -39,15 +39,21 @@
 |reset|なし|未確定入力を破棄。モードとローマ字規則を保つ|
 |commit|なし|現在の候補または読みを確定。idle では改行を返さない|
 |select|index|0始まりの候補番号を選ぶ。確定は別操作|
+|register|reading, text, 任意のokuri|単語を登録。現在の未確定入力は保ち、次の検索から使用|
 
 ```json
 {"id":8,"op":"state"}
 {"id":9,"op":"select","index":1}
 {"id":10,"op":"commit"}
+{"id":11,"op":"register","reading":"おくr","text":"贈","okuri":"る"}
 ```
 
 候補番号が範囲外の場合は `result.error` を返し、現在の候補を保つ。
 初期モードの変更と辞書の再読み込みは未実装。
+`register` は語幹だけを `text` に指定する。
+ユーザー辞書を指定しなければ登録はセッション内だけに残る。
+保存に失敗してもセッション内の登録は有効で、`learning_error` に失敗理由を返す。
+Rust の低水準 API `protocol::respond` は読み取り専用辞書を受け取るため登録できず、登録には `respond_session` または `serve_session` を使う。
 
 6番目の要求の応答例（主要フィールドのみ）:
 
@@ -71,7 +77,7 @@
 |candidates|候補本文textと任意のannotation。選択中以外は空配列|
 |candidate_index|0始まりの選択番号。選択中以外はnull|
 |passthrough|エンジンが消費しなかった名前付きキー。呼出元の編集機能で処理する|
-|error|辞書候補なし、未対応送り仮名などの入力操作エラー。通常はnull|
+|error|辞書候補なし、候補番号の範囲外などの操作エラー。通常はnull|
 |confirmed|辞書候補を確定した場合の見出し語、候補、送り仮名。それ以外はnull|
 |learning_error|任意のユーザー辞書への保存失敗。確定文字列は有効なまま返す。通常はnull|
 

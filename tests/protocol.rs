@@ -45,3 +45,31 @@ fn invalid_operation_fields_never_mutate_the_engine() {
         assert_eq!(e.snapshot().preedit, "▽k");
     }
 }
+
+#[test]
+fn session_registration_preserves_preedit_and_makes_words_available() {
+    use sumi_skk::{protocol::respond_session, session::Session};
+    let mut session = Session::new(Engine::default(), Dictionary::demo());
+    for key in ["M", "i", "c", "h", "i"] {
+        respond_session(&mut session, &json!({"id":0,"key":key}).to_string());
+    }
+    let before = session.snapshot().preedit;
+    let reply = respond_session(
+        &mut session,
+        &json!({"id":1,"op":"register","reading":"みち","text":"未知"}).to_string(),
+    );
+    assert_eq!(reply["result"]["preedit"], before);
+    assert_eq!(reply["result"]["committed"], "");
+    respond_session(&mut session, &json!({"id":2,"key":"Space"}).to_string());
+    assert_eq!(
+        respond_session(&mut session, &json!({"id":3,"op":"commit"}).to_string())["result"]["committed"],
+        "未知"
+    );
+    assert!(
+        respond_session(
+            &mut session,
+            &json!({"id":4,"op":"state","text":"bad"}).to_string()
+        )["error"]
+            .is_object()
+    );
+}

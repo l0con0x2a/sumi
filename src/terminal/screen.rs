@@ -85,6 +85,7 @@ pub fn draw(
     draft: &Draft,
     state: &Update,
     message: &str,
+    title: &str,
 ) -> io::Result<()> {
     let (columns, rows) = terminal.size();
     let available = columns.saturating_sub(1).max(1);
@@ -97,7 +98,7 @@ pub fn draw(
     let body_rows = rows - header - candidate_rows - 1;
     let mut display = vec![String::new(); rows];
     if header > 0 {
-        display[0] = "SKK  Ctrl-D: send  Esc/Ctrl-C: cancel  Ctrl-G: undo conversion".into();
+        display[0] = title.into();
     }
     let mut text = draft.text().to_owned();
     text.insert_str(draft.cursor(), &state.preedit);

@@ -20,6 +20,9 @@ struct Tui {
 }
 impl Tui {
     fn start() -> Self {
+        Self::start_with(&[])
+    }
+    fn start_with(args: &[&str]) -> Self {
         let mut master = -1;
         let mut slave = -1;
         let size = libc::winsize {
@@ -42,6 +45,10 @@ impl Tui {
             0
         );
         let master = unsafe { File::from_raw_fd(master) };
+        assert_eq!(
+            unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) },
+            0
+        );
         let slave = unsafe { File::from_raw_fd(slave) };
         let mut initial = std::mem::MaybeUninit::zeroed();
         assert_eq!(
@@ -51,6 +58,7 @@ impl Tui {
         let initial = unsafe { initial.assume_init() };
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_skk"));
         cmd.args(["tui"])
+            .args(args)
             .env_remove("SKK_DICTIONARY")
             .stdin(Stdio::from(slave))
             .stdout(Stdio::piped())
@@ -224,4 +232,42 @@ fn backspace_removes_a_complete_combined_character() {
     let mut tui = Tui::start();
     tui.send("\x1b[200~か\u{3099}👨‍👩‍👧‍👦\x1b[201~\x7f\x7fka\x04".as_bytes());
     assert_eq!(tui.finish(0), "か");
+}
+
+#[test]
+fn word_registration_works_without_a_user_dictionary() {
+    let mut tui = Tui::start();
+    tui.send(b"Michi \x12");
+    tui.wait_for("Register");
+    tui.send("\x1b[200~未知\x1b[201~\rMichi \r\x04".as_bytes());
+    assert_eq!(tui.finish(0), "未知未知");
+}
+#[test]
+fn cancelling_registration_returns_to_the_original_reading() {
+    let mut tui = Tui::start();
+    tui.send(b"Michi \x12");
+    tui.wait_for("Register");
+    tui.send(b"abc\x1b");
+    tui.wait_for("Registration cancelled");
+    tui.send(b"\r\x04");
+    assert_eq!(tui.finish(0), "みち");
+}
+#[test]
+fn registration_can_use_existing_conversions_and_persist_okuri() {
+    let directory = std::env::temp_dir().join(format!("sumi-tui-register-{}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let path = directory.join("user.skk");
+    let mut tui = Tui::start_with(&["--user-dict", path.to_str().unwrap()]);
+    tui.send(b"OkuRu\x07\x12");
+    tui.wait_for("Register");
+    tui.send("\x1b[200~贈\x1b[201~\r\x04".as_bytes());
+    assert_eq!(tui.finish(0), "贈る");
+    let d = sumi_skk::dictionary::Dictionary::load(&path).unwrap();
+    assert_eq!(d.lookup_okuri("おくr", "る")[0].text, "贈");
+    std::fs::remove_dir_all(directory).unwrap();
+    let mut tui = Tui::start();
+    tui.send(b"Michi \x12");
+    tui.wait_for("Register");
+    tui.send(b"Kanji \r\x04");
+    assert_eq!(tui.finish(0), "漢字");
 }
