@@ -91,7 +91,11 @@ fn kana_stdin_preserves_line_endings_and_flushes_eof() {
         .write_all("kan\r\n日本 konnichiha\nn".as_bytes())
         .unwrap();
     let output = child.wait_with_output().unwrap();
-    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, "かん\r\n日本 こんにちは\nん".as_bytes());
 }
 #[test]
@@ -227,7 +231,11 @@ fn non_utf8_paths_are_supported_but_text_arguments_are_validated() {
         .arg("かんじ")
         .output()
         .unwrap();
-    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(output.stdout, "漢字\n".as_bytes());
     assert!(
         skk()
@@ -256,4 +264,25 @@ fn non_utf8_paths_are_supported_but_text_arguments_are_validated() {
     assert_eq!(invalid.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("UTF-8"));
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn a_closed_output_pipe_is_a_normal_exit() {
+    let mut child = skk()
+        .args(["serve", "--stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take().unwrap());
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"{\"id\":1,\"key\":\"a\"}\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
 }
