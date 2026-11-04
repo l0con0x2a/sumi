@@ -70,8 +70,9 @@ fn help_version_and_kana_do_not_load_a_dictionary() {
     assert_eq!(
         skk()
             .args(["kana", "--json", "ka"])
-            .status()
+            .output()
             .unwrap()
+            .status
             .code(),
         Some(2)
     );

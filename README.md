@@ -187,9 +187,10 @@ Rust からは `Engine::process_key(Key, &Dictionary) -> Update` を使えます
 かな変換だけなら `kana::Converter` を使い、入力の断片を順に渡せます。
 エンジンは画面表示や外部プロセスを操作しません。
 
-Kakoune や tmux 向けの実験的な連携は、隣の独立リポジトリ `../sumi-adapters` へ移しました。
-このリポジトリのビルドや通常のテストには必要ありません。
+アプリケーション向けのアダプタは別リポジトリで管理し、本体のビルドやテストに含めません。
 アダプタは公開された stdio 通信または CLI の標準出力を使います。
+通信の往復を行う独立したプログラムの例として、`examples/stdio_latency.rs` を用意しています。
+この例はエンジンの Rust API を使わず、1 つの `skk` プロセスへ要求を送ります。
 
 ## 制約
 
@@ -208,9 +209,11 @@ skk serve --stdio --romaji common
 
 外来音の `thi`、`twu`、`tsa` などと、`zh`、`zj`、`zk`、`zl` による矢印入力にも対応します。
 無効なローマ字や未完成の入力は失わないよう文字のまま残します。
+ただし、直接入力の `q` / `l` によるモード切替では未完成の子音を破棄し、末尾の n だけを確定します。
 ローマ字表の拡充と、既存 SKK との比較は継続する課題です。
 
 引数の誤りは終了コード 2、辞書や I/O のエラーは 1、正常終了は 0 です。
+読みや本文は UTF-8 で指定しますが、Unix の辞書パスは UTF-8 でないファイル名にも対応します。
 出力先が閉じた場合の Broken pipe は正常終了として扱います。
 `--help` と `--version` は辞書を読み込みません。
 
@@ -221,6 +224,7 @@ cargo test --locked
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo run --release --example latency -- /path/to/SKK-JISYO.L.utf8
+cargo run --release --example stdio_latency -- ./target/release/skk /path/to/SKK-JISYO.L.utf8
 ```
 
 |ファイル|責務|
@@ -237,4 +241,5 @@ cargo run --release --example latency -- /path/to/SKK-JISYO.L.utf8
 |`tests/`|エンジン、辞書、通信、CLI の自動テスト|
 
 Rust を採用した理由、先行実装の参照先、ライセンス確認は [調査記録](docs/research.md) に残しています。
-初期実装時の実機確認と遅延測定は [検証記録](docs/validation.md) を参照してください。
+構成と責務の分担は [アーキテクチャ](docs/architecture.md)、実機確認と遅延測定は [検証記録](docs/validation.md) に記載しています。
+変更を加える場合の確認手順は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。

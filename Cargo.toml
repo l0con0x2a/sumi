@@ -5,6 +5,8 @@ edition = "2024"
 rust-version = "1.89"
 license = "MIT"
 description = "An editor-independent SKK engine and Unix CLI"
+repository = "https://github.com/l0con0x2a/sumi"
+readme = "README.md"
 
 [lib]
 name = "sumi_skk"

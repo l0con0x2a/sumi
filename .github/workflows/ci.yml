@@ -1,0 +1,42 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.89.0", stable]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install "${{ matrix.toolchain }}" --profile minimal
+      - run: cargo +${{ matrix.toolchain }} test --locked
+      - run: cargo +${{ matrix.toolchain }} test --no-default-features --locked
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - run: cargo +stable fmt --check
+      - run: cargo +stable clippy --all-targets -- -D warnings
+      - run: cargo +stable clippy --all-targets --no-default-features -- -D warnings
+      - run: cargo +stable doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+  musl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal --target x86_64-unknown-linux-musl
+      - run: cargo +stable test --release --target x86_64-unknown-linux-musl --locked
