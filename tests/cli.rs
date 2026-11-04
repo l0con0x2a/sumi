@@ -91,7 +91,7 @@ fn kana_stdin_preserves_line_endings_and_flushes_eof() {
         .write_all("kan\r\n日本 konnichiha\nn".as_bytes())
         .unwrap();
     let output = child.wait_with_output().unwrap();
-    assert!(output.status.success());
+    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
     assert_eq!(output.stdout, "かん\r\n日本 こんにちは\nん".as_bytes());
 }
 #[test]
@@ -209,5 +209,51 @@ fn registration_and_session_learning_work_through_public_commands() {
         .output()
         .unwrap();
     assert_eq!(search.stdout, "感じ\n漢字\n".as_bytes());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_paths_are_supported_but_text_arguments_are_validated() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    let directory = std::env::temp_dir().join(format!("sumi-cli-bytes-{}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let dictionary = directory.join(OsString::from_vec(b"dict-\xff.skk".to_vec()));
+    let user = directory.join(OsString::from_vec(b"user-\xfe.skk".to_vec()));
+    std::fs::write(&dictionary, "かんじ /漢字/\n").unwrap();
+    let output = skk()
+        .args(["convert", "--dict"])
+        .arg(&dictionary)
+        .arg("かんじ")
+        .output()
+        .unwrap();
+    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, "漢字\n".as_bytes());
+    assert!(
+        skk()
+            .arg("check-dict")
+            .arg(&dictionary)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(
+        skk()
+            .args(["register", "--user-dict"])
+            .arg(&user)
+            .args(["かな", "仮名"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let invalid = skk()
+        .arg("kana")
+        .arg(OsString::from_vec(vec![0xff]))
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("UTF-8"));
     std::fs::remove_dir_all(directory).unwrap();
 }

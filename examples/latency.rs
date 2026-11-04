@@ -2,7 +2,7 @@ use std::time::Instant;
 use sumi_skk::{Engine, Key, dictionary::Dictionary};
 fn main() {
     let start = Instant::now();
-    let d = std::env::args()
+    let d = std::env::args_os()
         .nth(1)
         .map_or_else(|| Ok(Dictionary::demo()), Dictionary::load)
         .expect("dictionary");

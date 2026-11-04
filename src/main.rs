@@ -3,6 +3,7 @@ mod terminal;
 
 use std::{
     env,
+    ffi::{OsStr, OsString},
     io::{self, BufRead, Write},
     path::PathBuf,
     process::ExitCode,
@@ -47,7 +48,7 @@ fn usage(message: impl Into<String>) -> io::Error {
 }
 #[derive(Default)]
 struct Options {
-    words: Vec<String>,
+    words: Vec<OsString>,
     dictionaries: Vec<PathBuf>,
     json: bool,
     katakana: bool,
@@ -55,44 +56,53 @@ struct Options {
     user_dictionary: Option<PathBuf>,
     okuri: Option<String>,
 }
-fn options(args: impl Iterator<Item = String>) -> io::Result<Options> {
+fn utf8<'a>(word: &'a OsStr, name: &str) -> io::Result<&'a str> {
+    word.to_str()
+        .ok_or_else(|| usage(format!("{name} must be UTF-8")))
+}
+fn options(args: impl Iterator<Item = OsString>) -> io::Result<Options> {
     let mut options = Options::default();
     let mut args = args.peekable();
     let mut positional = false;
     while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--" if !positional => positional = true,
-            "--dict" if !positional => {
+        match arg.to_str() {
+            Some("--") if !positional => positional = true,
+            Some("--dict") if !positional => {
                 let path = args
                     .next()
                     .ok_or_else(|| usage("--dict requires a UTF-8 dictionary file"))?;
                 options.dictionaries.push(path.into());
             }
-            "--json" if !positional => options.json = true,
-            "--user-dict" if !positional => {
+            Some("--json") if !positional => options.json = true,
+            Some("--user-dict") if !positional => {
                 options.user_dictionary = Some(
                     args.next()
                         .ok_or_else(|| usage("--user-dict requires a filename"))?
                         .into(),
                 )
             }
-            "--okuri" if !positional => {
+            Some("--okuri") if !positional => {
                 options.okuri = Some(
-                    args.next()
-                        .ok_or_else(|| usage("--okuri requires a suffix"))?,
+                    utf8(
+                        &args
+                            .next()
+                            .ok_or_else(|| usage("--okuri requires a suffix"))?,
+                        "--okuri",
+                    )?
+                    .to_owned(),
                 )
             }
-            "--katakana" if !positional => options.katakana = true,
-            "--romaji" if !positional => {
-                options.romaji = Some(match args.next().as_deref() {
+            Some("--katakana") if !positional => options.katakana = true,
+            Some("--romaji") if !positional => {
+                options.romaji = Some(match args.next().as_ref().and_then(|s| s.to_str()) {
                     Some("skk") => RomajiRule::Skk,
                     Some("common") => RomajiRule::Common,
                     _ => return Err(usage("--romaji requires skk or common")),
                 });
             }
-            "--stdio" if !positional => options.words.push(arg),
-            _ if !positional && arg.starts_with('-') => {
-                return Err(usage(format!("unknown option: {arg}")));
+            Some("--stdio") if !positional => options.words.push(arg),
+            _ if !positional && arg.as_encoded_bytes().starts_with(b"-") => {
+                return Err(usage(format!("unknown option: {}", arg.to_string_lossy())));
             }
             _ => options.words.push(arg),
         }
@@ -125,7 +135,7 @@ fn session(options: &Options) -> io::Result<Session> {
         None => Ok(Session::new(engine, dictionary)),
     }
 }
-fn kana(text: Option<&String>, script: Script, rule: RomajiRule) -> io::Result<()> {
+fn kana(text: Option<&str>, script: Script, rule: RomajiRule) -> io::Result<()> {
     let mut converter = Converter::with_rule(script, rule);
     let mut out = io::stdout().lock();
     if let Some(text) = text {
@@ -144,11 +154,11 @@ fn kana(text: Option<&String>, script: Script, rule: RomajiRule) -> io::Result<(
     out.flush()
 }
 fn run() -> io::Result<()> {
-    let args: Vec<_> = env::args().skip(1).collect();
+    let args: Vec<_> = env::args_os().skip(1).collect();
     if args.is_empty()
         || args
             .iter()
-            .take_while(|s| s.as_str() != "--")
+            .take_while(|s| s.as_os_str() != "--")
             .any(|s| s == "--help" || s == "-h")
         || args == ["help"]
     {
@@ -157,9 +167,9 @@ fn run() -> io::Result<()> {
     if args == ["--version"] {
         return writeln!(io::stdout().lock(), "skk {}", env!("CARGO_PKG_VERSION"));
     }
-    let command = &args[0];
+    let command = utf8(&args[0], "command")?;
     let options = options(args[1..].iter().cloned())?;
-    match command.as_str() {
+    match command {
         "kana" => {
             if options.json
                 || !options.dictionaries.is_empty()
@@ -170,7 +180,11 @@ fn run() -> io::Result<()> {
                 return Err(usage("usage: skk kana [--katakana] [TEXT]"));
             }
             kana(
-                options.words.first(),
+                options
+                    .words
+                    .first()
+                    .map(|word| utf8(word, "TEXT"))
+                    .transpose()?,
                 if options.katakana {
                     Script::Katakana
                 } else {
@@ -185,8 +199,9 @@ fn run() -> io::Result<()> {
                 && options.okuri.is_none()
                 && options.words.len() == 1 =>
         {
+            let reading = utf8(&options.words[0], "READING")?;
             let session = session(&options)?;
-            let candidates = session.dictionary().lookup(&options.words[0]);
+            let candidates = session.dictionary().lookup(reading);
             let mut out = io::stdout().lock();
             if options.json {
                 serde_json::to_writer(&mut out, candidates)?;
@@ -220,15 +235,16 @@ fn run() -> io::Result<()> {
                 && options.dictionaries.is_empty()
                 && options.words.len() == 2 =>
         {
-            let (user, _) = UserDictionary::open(options.user_dictionary.as_ref().unwrap())?;
-            user.record(&Confirmed {
-                dictionary_key: options.words[0].clone(),
+            let confirmed = Confirmed {
+                dictionary_key: utf8(&options.words[0], "READING")?.into(),
                 candidate: Candidate {
-                    text: options.words[1].clone(),
+                    text: utf8(&options.words[1], "TEXT")?.into(),
                     annotation: None,
                 },
                 okuri: options.okuri,
-            })
+            };
+            let (user, _) = UserDictionary::open(options.user_dictionary.as_ref().unwrap())?;
+            user.record(&confirmed)
         }
         "serve"
             if !options.json
