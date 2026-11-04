@@ -6,8 +6,8 @@ OS の IME や、特定のエディタ、ターミナルマルチプレクサは
 
 ## 試す
 
-Rust stable と C リンカを用意し、ビルドします。
-検証環境は Void Linux/glibc、Rust 1.99.1 です。
+Rust 1.89 以降と C リンカを用意し、ビルドします。
+検証環境は Void Linux/glibc、Rust 1.89.0 と 1.99.1 です。
 
 ```sh
 cargo build --release --locked
@@ -26,8 +26,8 @@ cargo install --path . --locked
 
 Rust はビルド時だけ必要です。
 共通部分の直接依存は JSON 通信に使う `serde` と `serde_json` です。
-端末 UI には POSIX 端末制御の `libc` と表示幅計算の `unicode-width` を使います。
-`--no-default-features` でビルドすると、この2つの依存と `tui` を除外できます。
+端末 UI には POSIX 端末制御の `libc`、表示幅計算の `unicode-width`、結合文字の編集用の `unicode-segmentation` を使います。
+`--no-default-features` でビルドすると、この3つの依存と `tui` を除外できます。
 辞書とローマ字変換のロジックにエディタ依存や OS IME 依存はありません。
 
 ## かな変換
@@ -150,7 +150,8 @@ Ctrl-D で全文を送信し、Esc/Ctrl-C で全体をキャンセルします�
 画面サイズの変更にも追従します。
 通常終了、キャンセル、I/O エラー、SIGINT、SIGTERM、SIGHUP では端末設定を復元します。
 SIGKILL のように処理を実行できない終了には対応できません。
-カーソル移動と削除は Unicode scalar 単位で、結合文字列全体の編集単位には未対応です。
+本文のカーソル移動と削除は結合文字単位です。
+結合濁点や、複数のコードポイントからなる絵文字を途中で分割しません。
 
 ## 他のプログラムから使う
 

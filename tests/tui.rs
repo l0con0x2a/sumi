@@ -43,7 +43,7 @@ impl Tui {
         );
         let master = unsafe { File::from_raw_fd(master) };
         let slave = unsafe { File::from_raw_fd(slave) };
-        let mut initial = std::mem::MaybeUninit::uninit();
+        let mut initial = std::mem::MaybeUninit::zeroed();
         assert_eq!(
             unsafe { libc::tcgetattr(slave.as_raw_fd(), initial.as_mut_ptr()) },
             0
@@ -115,7 +115,7 @@ impl Tui {
             .unwrap()
             .read_to_string(&mut stdout)
             .unwrap();
-        let mut termios = std::mem::MaybeUninit::uninit();
+        let mut termios = std::mem::MaybeUninit::zeroed();
         assert_eq!(
             unsafe { libc::tcgetattr(self.master.as_raw_fd(), termios.as_mut_ptr()) },
             0
@@ -200,7 +200,7 @@ fn suspension_restores_the_terminal_and_retains_the_draft() {
         assert!(Instant::now() < deadline, "TUI did not suspend");
         std::thread::sleep(Duration::from_millis(10));
     }
-    let mut termios = std::mem::MaybeUninit::uninit();
+    let mut termios = std::mem::MaybeUninit::zeroed();
     assert_eq!(
         unsafe { libc::tcgetattr(tui.master.as_raw_fd(), termios.as_mut_ptr()) },
         0
@@ -217,4 +217,11 @@ fn suspension_restores_the_terminal_and_retains_the_draft() {
     tui.wait_for("\x1b[?1049h");
     tui.send(b"na\x04");
     assert_eq!(tui.finish(0), "かな");
+}
+
+#[test]
+fn backspace_removes_a_complete_combined_character() {
+    let mut tui = Tui::start();
+    tui.send("\x1b[200~か\u{3099}👨‍👩‍👧‍👦\x1b[201~\x7f\x7fka\x04".as_bytes());
+    assert_eq!(tui.finish(0), "か");
 }

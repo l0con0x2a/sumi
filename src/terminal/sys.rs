@@ -47,7 +47,7 @@ impl Signals {
                 let mut action: libc::sigaction = std::mem::zeroed();
                 action.sa_sigaction = signal_handler as *const () as usize;
                 libc::sigemptyset(&mut action.sa_mask);
-                let mut old = std::mem::MaybeUninit::uninit();
+                let mut old = std::mem::MaybeUninit::zeroed();
                 if libc::sigaction(signal, &action, old.as_mut_ptr()) < 0 {
                     return Err(io::Error::last_os_error());
                 }
@@ -76,7 +76,10 @@ pub struct Terminal {
 impl Terminal {
     pub fn open() -> io::Result<Self> {
         let tty = OpenOptions::new().read(true).write(true).open("/dev/tty")?;
-        let mut saved = std::mem::MaybeUninit::uninit();
+        // Some libc implementations leave unused c_cc elements untouched.
+        // Zero the full struct before tcgetattr, rather than assuming it fills
+        // every Rust field (including unused control-character slots).
+        let mut saved = std::mem::MaybeUninit::zeroed();
         // SAFETY: tty is open, and tcgetattr initializes saved on success.
         if unsafe { libc::tcgetattr(tty.as_raw_fd(), saved.as_mut_ptr()) } < 0 {
             return Err(io::Error::last_os_error());
@@ -127,7 +130,7 @@ impl Terminal {
         Ok(())
     }
     pub fn size(&self) -> (usize, usize) {
-        let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+        let mut size = std::mem::MaybeUninit::<libc::winsize>::zeroed();
         // SAFETY: ioctl writes a winsize when successful.
         if unsafe { libc::ioctl(self.tty.as_raw_fd(), libc::TIOCGWINSZ, size.as_mut_ptr()) } == 0 {
             let size = unsafe { size.assume_init() };

@@ -1,18 +1,34 @@
 use super::{editor::Draft, sys::Terminal};
-use std::io::{self, Write};
+use std::{
+    borrow::Cow,
+    io::{self, Write},
+};
 use sumi_skk::Update;
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
+
+fn visible(text: &str, replacement: char) -> Cow<'_, str> {
+    if text.chars().any(char::is_control) {
+        Cow::Owned(
+            text.chars()
+                .map(|c| if c.is_control() { replacement } else { c })
+                .collect(),
+        )
+    } else {
+        Cow::Borrowed(text)
+    }
+}
 
 fn clip(text: &str, columns: usize) -> String {
     let mut result = String::new();
     let mut used = 0;
-    for c in text.chars() {
-        let c = if c.is_control() { ' ' } else { c };
-        let width = c.width().unwrap_or(1);
+    for grapheme in text.graphemes(true) {
+        let grapheme = visible(grapheme, ' ');
+        let width = grapheme.width();
         if used + width > columns {
             break;
         }
-        result.push(c);
+        result.push_str(&grapheme);
         used += width;
     }
     result
@@ -21,18 +37,18 @@ fn layout(text: &str, caret: usize, columns: usize) -> (Vec<String>, (usize, usi
     let mut lines = vec![String::new()];
     let mut column = 0;
     let mut cursor = (0, 0);
-    for (offset, original) in text.char_indices().chain([(text.len(), '\0')]) {
-        let c = if original.is_control() && original != '\n' && original != '\t' {
-            '�'
+    for (offset, original) in text.grapheme_indices(true).chain([(text.len(), "")]) {
+        let grapheme = if original == "\n" || original == "\t" {
+            Cow::Borrowed(original)
         } else {
-            original
+            visible(original, '�')
         };
-        let width = if c == '\t' {
+        let width = if grapheme == "\t" {
             4 - column % 4
         } else {
-            c.width().unwrap_or(0)
+            grapheme.width()
         };
-        if c != '\n' && (column >= columns || column + width > columns) {
+        if grapheme != "\n" && grapheme != "\t" && (column >= columns || column + width > columns) {
             lines.push(String::new());
             column = 0;
         }
@@ -42,10 +58,10 @@ fn layout(text: &str, caret: usize, columns: usize) -> (Vec<String>, (usize, usi
         if offset == text.len() {
             break;
         }
-        if c == '\n' {
+        if grapheme == "\n" {
             lines.push(String::new());
             column = 0;
-        } else if c == '\t' {
+        } else if grapheme == "\t" {
             for _ in 0..width {
                 if column >= columns {
                     lines.push(String::new());
@@ -55,8 +71,11 @@ fn layout(text: &str, caret: usize, columns: usize) -> (Vec<String>, (usize, usi
                 column += 1;
             }
         } else {
-            lines.last_mut().unwrap().push(c);
+            lines.last_mut().unwrap().push_str(&grapheme);
             column += width;
+        }
+        if offset < caret && caret < offset + original.len() {
+            cursor = (lines.len() - 1, column);
         }
     }
     (lines, cursor)
@@ -154,5 +173,17 @@ mod tests {
         assert_eq!(clip("a\x1b[31m", 20), "a [31m");
         let (lines, _) = layout("a\t日\nb", 0, 6);
         assert_eq!(lines, ["a   日", "b"]);
+    }
+}
+
+#[cfg(test)]
+mod grapheme_tests {
+    use super::*;
+    #[test]
+    fn joined_emoji_have_one_display_width() {
+        let family = "👨‍👩‍👧‍👦";
+        assert_eq!(clip(&format!("a{family}b"), 3), format!("a{family}"));
+        let (_, caret) = layout(&format!("a{family}b"), 1 + family.len(), 5);
+        assert_eq!(caret, (0, 3));
     }
 }
