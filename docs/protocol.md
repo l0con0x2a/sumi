@@ -49,7 +49,7 @@
 候補番号が範囲外の場合は `result.error` を返し、現在の候補を保つ。
 初期モードの変更と辞書の再読み込みは未実装。
 
-6番目の要求の応答例:
+6番目の要求の応答例（主要フィールドのみ）:
 
 ```json
 {"id":6,"result":{"mode":"hiragana","phase":"selecting_candidates","preedit":"▼漢字","committed":"","candidates":[{"text":"漢字","annotation":null},{"text":"感じ","annotation":"感覚"}],"candidate_index":0,"passthrough":null,"error":null}}
@@ -72,6 +72,8 @@
 |candidate_index|0始まりの選択番号。選択中以外はnull|
 |passthrough|エンジンが消費しなかった名前付きキー。呼出元の編集機能で処理する|
 |error|辞書候補なし、未対応送り仮名などの入力操作エラー。通常はnull|
+|confirmed|辞書候補を確定した場合の見出し語、候補、送り仮名。それ以外はnull|
+|learning_error|任意のユーザー辞書への保存失敗。確定文字列は有効なまま返す。通常はnull|
 
 `result.error` があっても、その時点の状態がresultに含まれる。
 操作によっては末尾nのかな化等が行われるため、エラーを理由にresult全体を破棄しない。
@@ -94,6 +96,15 @@
 
 このプロトコルはMVP版で、拡張時の互換性方針やバージョンネゴシエーションは今後定義する。
 クライアントは追加された応答フィールドを無視できるようにする。
+
+`--user-dict FILE` を付けて起動した場合、辞書候補の確定時に学習する。
+保存失敗は `learning_error` として返し、セッションを終了しない。
+確定した本文をアプリケーションへ渡す処理と、保存失敗の表示を分けて扱う。
+`confirmed` は次のようなデータで、純粋な Engine を利用する呼出元でも独自の学習処理に使える。
+
+```json
+{"dictionary_key":"おくr","candidate":{"text":"贈","annotation":null},"okuri":"る"}
+```
 
 送り仮名付き入力では、たとえば `O k u R u` で見出し語 `おくr` を検索する。
 かなが完成すると Space を待たず候補選択へ進む。

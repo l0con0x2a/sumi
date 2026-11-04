@@ -6,7 +6,7 @@ mod sys;
 use editor::Draft;
 use input::Event;
 use std::io;
-use sumi_skk::{Engine, Key, Mode, Phase, RomajiRule, Update, dictionary::Dictionary};
+use sumi_skk::{Key, Phase, Update, session::Session};
 use sys::Terminal;
 pub use sys::interrupted_signal;
 
@@ -17,34 +17,36 @@ fn apply(draft: &mut Draft, update: Update) -> String {
         Some("Enter") => draft.insert("\n"),
         _ => (),
     }
-    update.error.unwrap_or_default()
-}
-fn confirm(engine: &mut Engine, draft: &mut Draft, dictionary: &Dictionary) {
-    if !engine.is_idle() {
-        apply(draft, engine.process_key(Key::Enter, dictionary));
+    match (update.error, update.learning_error) {
+        (Some(error), Some(learning)) => format!("{error}; learning failed: {learning}"),
+        (Some(error), None) => error,
+        (None, Some(learning)) => format!("Learning failed: {learning}"),
+        (None, None) => String::new(),
     }
 }
-pub fn run(dictionary: &Dictionary, rule: RomajiRule) -> io::Result<Option<String>> {
+fn confirm(session: &mut Session, draft: &mut Draft) -> String {
+    apply(draft, session.commit())
+}
+pub fn run(mut session: Session) -> io::Result<Option<String>> {
     let mut terminal = Terminal::open()?;
-    let mut engine = Engine::with_romaji_rule(Mode::Hiragana, rule);
     let mut draft = Draft::default();
     let mut message = String::new();
     let mut dirty = true;
     loop {
         if dirty {
-            screen::draw(&mut terminal, &draft, &engine.snapshot(), &message)?;
+            screen::draw(&mut terminal, &draft, &session.snapshot(), &message)?;
         }
         dirty = true;
         let event = terminal.event()?;
         match event {
             Event::Cancel => return Ok(None),
             Event::Submit => {
-                if engine.is_idle() {
+                if session.is_idle() {
                     return Ok(Some(draft.into_text()));
                 }
                 message = "Confirm pending input with Enter before sending".into();
             }
-            Event::Key(key) => message = apply(&mut draft, engine.process_key(key, dictionary)),
+            Event::Key(key) => message = apply(&mut draft, session.process_key(key)),
             Event::Paste(text) => {
                 if text
                     .chars()
@@ -52,22 +54,18 @@ pub fn run(dictionary: &Dictionary, rule: RomajiRule) -> io::Result<Option<Strin
                 {
                     message = "Paste contains unsupported control characters".into();
                 } else {
-                    confirm(&mut engine, &mut draft, dictionary);
+                    message = confirm(&mut session, &mut draft);
                     draft.insert(&text);
-                    message.clear();
                 }
             }
-            Event::Up | Event::Down if engine.snapshot().phase == Phase::SelectingCandidates => {
+            Event::Up | Event::Down if session.snapshot().phase == Phase::SelectingCandidates => {
                 message = apply(
                     &mut draft,
-                    engine.process_key(
-                        if event == Event::Up {
-                            Key::Char('x')
-                        } else {
-                            Key::Space
-                        },
-                        dictionary,
-                    ),
+                    session.process_key(if event == Event::Up {
+                        Key::Char('x')
+                    } else {
+                        Key::Space
+                    }),
                 );
             }
             Event::Left
@@ -79,7 +77,7 @@ pub fn run(dictionary: &Dictionary, rule: RomajiRule) -> io::Result<Option<Strin
             | Event::Delete
             | Event::KillToStart
             | Event::DeleteWord => {
-                confirm(&mut engine, &mut draft, dictionary);
+                message = confirm(&mut session, &mut draft);
                 match event {
                     Event::Left => draft.left(),
                     Event::Right => draft.right(),
@@ -92,7 +90,6 @@ pub fn run(dictionary: &Dictionary, rule: RomajiRule) -> io::Result<Option<Strin
                     Event::DeleteWord => draft.delete_word(),
                     _ => unreachable!(),
                 }
-                message.clear();
             }
             Event::Suspend => terminal.suspend()?,
             Event::Redraw => (),

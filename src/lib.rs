@@ -6,6 +6,8 @@ pub mod dictionary;
 pub mod kana;
 pub mod protocol;
 mod romaji;
+pub mod session;
+pub mod user_dictionary;
 pub use romaji::Rule as RomajiRule;
 
 use dictionary::{Candidate, Dictionary};
@@ -141,6 +143,16 @@ pub struct Update {
     pub candidate_index: Option<usize>,
     pub passthrough: Option<String>,
     pub error: Option<String>,
+    /// A confirmed dictionary choice, for optional learning outside the engine.
+    pub confirmed: Option<Confirmed>,
+    /// Set by a persistence-enabled Session, never by the pure Engine.
+    pub learning_error: Option<String>,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct Confirmed {
+    pub dictionary_key: String,
+    pub candidate: Candidate,
+    pub okuri: Option<String>,
 }
 impl Default for Engine {
     fn default() -> Self {
@@ -204,6 +216,8 @@ impl Engine {
             candidate_index: index,
             passthrough: None,
             error: None,
+            confirmed: None,
+            learning_error: None,
         }
     }
     pub fn is_idle(&self) -> bool {
@@ -271,6 +285,7 @@ impl Engine {
             };
         }
         let mut committed = String::new();
+        let mut confirmed = None;
         let mut passthrough = None;
         let mut error = None;
         let composition = std::mem::take(&mut self.composition);
@@ -307,6 +322,11 @@ impl Engine {
                     self.composition = Composition::Reading(reading)
                 }
                 Key::Enter | Key::CtrlJ => {
+                    confirmed = Some(Confirmed {
+                        dictionary_key: reading.key(),
+                        candidate: candidates[index].clone(),
+                        okuri: reading.okuri.as_ref().map(|o| o.text.clone()),
+                    });
                     committed = format!(
                         "{}{}",
                         candidates[index].text,
@@ -317,6 +337,11 @@ impl Engine {
                     }
                 }
                 _ => {
+                    confirmed = Some(Confirmed {
+                        dictionary_key: reading.key(),
+                        candidate: candidates[index].clone(),
+                        okuri: reading.okuri.as_ref().map(|o| o.text.clone()),
+                    });
                     committed = format!(
                         "{}{}",
                         candidates[index].text,
@@ -324,7 +349,11 @@ impl Engine {
                     );
                     let next = self.process_key(key, dictionary);
                     committed.push_str(&next.committed);
-                    return Update { committed, ..next };
+                    return Update {
+                        committed,
+                        confirmed,
+                        ..next
+                    };
                 }
             }
         } else {
@@ -462,6 +491,7 @@ impl Engine {
         }
         Update {
             committed,
+            confirmed,
             passthrough,
             error,
             ..self.snapshot()

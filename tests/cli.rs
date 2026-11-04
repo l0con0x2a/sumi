@@ -150,3 +150,64 @@ fn option_terminator_preserves_help_as_a_literal_reading() {
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
 }
+
+#[test]
+fn registration_and_session_learning_work_through_public_commands() {
+    let directory = std::env::temp_dir().join(format!("sumi-cli-learning-{}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let path = directory.join("user.skk");
+    let registered = skk()
+        .args(["register", "--user-dict"])
+        .arg(&path)
+        .args(["あたらしい", "新しい語"])
+        .output()
+        .unwrap();
+    assert!(
+        registered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&registered.stderr)
+    );
+    assert!(registered.stdout.is_empty());
+    let search = skk()
+        .args(["convert", "--user-dict"])
+        .arg(&path)
+        .arg("あたらしい")
+        .output()
+        .unwrap();
+    assert_eq!(search.stdout, "新しい語\n".as_bytes());
+    let mut child = skk()
+        .args(["serve", "--stdio", "--user-dict"])
+        .arg(&path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    for (id, key) in ["K", "a", "n", "j", "i", "Space", "Space", "Enter"]
+        .iter()
+        .enumerate()
+    {
+        writeln!(input, "{}", serde_json::json!({"id":id,"key":key})).unwrap();
+    }
+    drop(input);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let rows: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(rows.last().unwrap()["result"]["committed"], "感じ");
+    assert_eq!(
+        rows.last().unwrap()["result"]["learning_error"],
+        serde_json::Value::Null
+    );
+    let search = skk()
+        .args(["convert", "--user-dict"])
+        .arg(&path)
+        .arg("かんじ")
+        .output()
+        .unwrap();
+    assert_eq!(search.stdout, "感じ\n漢字\n".as_bytes());
+    std::fs::remove_dir_all(directory).unwrap();
+}

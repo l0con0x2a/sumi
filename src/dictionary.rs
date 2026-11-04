@@ -280,4 +280,103 @@ impl Dictionary {
             skipped_candidates: self.skipped_candidates,
         }
     }
+    /// Remember a preferred candidate without touching the filesystem.
+    pub fn promote(
+        &mut self,
+        reading: &str,
+        candidate: Candidate,
+        okuri: Option<&str>,
+    ) -> Result<(), String> {
+        if !supported_reading(reading)
+            || (okuri.is_some() && !reading.ends_with(|c: char| c.is_ascii_lowercase()))
+            || candidate.text.is_empty()
+            || candidate.text.chars().any(char::is_control)
+            || candidate
+                .annotation
+                .as_ref()
+                .is_some_and(|s| s.chars().any(char::is_control))
+            || okuri.is_some_and(|s| {
+                s.is_empty() || s.chars().any(|c| c.is_control() || "/[]".contains(c))
+            })
+        {
+            return Err("invalid reading, candidate or okuri".into());
+        }
+        let entry = self.entries.entry(reading.into()).or_default();
+        let promote = |list: &mut Vec<Candidate>| {
+            list.retain(|c| c.text != candidate.text);
+            list.insert(0, candidate.clone());
+        };
+        promote(&mut entry.candidates);
+        if let Some(suffix) = okuri {
+            promote(entry.okuri.entry(suffix.into()).or_default());
+        }
+        Ok(())
+    }
+    /// Deterministic SKK serialization of supported data. Comments are managed
+    /// separately by UserDictionary so a save can retain copyright/user notes.
+    pub fn to_skk(&self) -> String {
+        let mut output = String::new();
+        let mut keys: Vec<_> = self.entries.keys().collect();
+        keys.sort();
+        for okuri in [true, false] {
+            output.push_str(if okuri {
+                ";; okuri-ari entries.\n"
+            } else {
+                ";; okuri-nasi entries.\n"
+            });
+            let mut group: Vec<_> = keys
+                .iter()
+                .filter(|k| k.ends_with(|c: char| c.is_ascii_lowercase()) == okuri)
+                .collect();
+            if okuri {
+                group.reverse();
+            }
+            for key in group {
+                let entry = &self.entries[*key];
+                output.push_str(key);
+                output.push_str(" /");
+                for candidate in &entry.candidates {
+                    write_candidate(&mut output, candidate);
+                }
+                let mut suffixes: Vec<_> = entry.okuri.keys().collect();
+                suffixes.sort();
+                for suffix in suffixes {
+                    output.push('[');
+                    output.push_str(suffix);
+                    output.push('/');
+                    for candidate in &entry.okuri[suffix] {
+                        write_candidate(&mut output, candidate);
+                    }
+                    output.push_str("]/");
+                }
+                output.push('\n');
+            }
+        }
+        output
+    }
+}
+fn encode(value: &str) -> String {
+    if !value.contains(['/', ';']) && !value.starts_with(['(', '[', ']']) {
+        return value.into();
+    }
+    let mut output = String::from("(concat \"");
+    for c in value.chars() {
+        match c {
+            '/' => output.push_str("\\057"),
+            ';' => output.push_str("\\073"),
+            '\\' => output.push_str("\\\\"),
+            '"' => output.push_str("\\\""),
+            c => output.push(c),
+        }
+    }
+    output.push_str("\")");
+    output
+}
+fn write_candidate(output: &mut String, candidate: &Candidate) {
+    output.push_str(&encode(&candidate.text));
+    if let Some(annotation) = &candidate.annotation {
+        output.push(';');
+        output.push_str(&encode(annotation));
+    }
+    output.push('/');
 }

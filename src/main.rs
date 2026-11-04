@@ -8,10 +8,12 @@ use std::{
     process::ExitCode,
 };
 use sumi_skk::{
-    Engine, Mode, RomajiRule,
-    dictionary::Dictionary,
+    Confirmed, Engine, Mode, RomajiRule,
+    dictionary::{Candidate, Dictionary},
     kana::{Converter, Script},
     protocol,
+    session::Session,
+    user_dictionary::UserDictionary,
 };
 
 const HELP: &str = "skk — standalone SKK input and kana conversion
@@ -20,12 +22,14 @@ Usage:
   skk kana [--katakana] [TEXT]
   skk convert [--json] [--dict FILE]... READING
   skk check-dict FILE
+  skk register --user-dict FILE [--okuri SUFFIX] READING TEXT
   skk serve --stdio [--dict FILE]...
   skk tui [--dict FILE]...
   skk --help
   skk --version
 
 --romaji skk|common selects double-n behavior (kana: common; serve/tui: skk).
+--user-dict FILE enables candidate learning for serve/tui and priority lookup for convert.
 
 kana:    Transliterate literal romaji; read UTF-8 stdin when TEXT is omitted.
 convert: Print dictionary candidates, one per line; --json includes annotations.
@@ -48,6 +52,8 @@ struct Options {
     json: bool,
     katakana: bool,
     romaji: Option<RomajiRule>,
+    user_dictionary: Option<PathBuf>,
+    okuri: Option<String>,
 }
 fn options(args: impl Iterator<Item = String>) -> io::Result<Options> {
     let mut options = Options::default();
@@ -63,6 +69,19 @@ fn options(args: impl Iterator<Item = String>) -> io::Result<Options> {
                 options.dictionaries.push(path.into());
             }
             "--json" if !positional => options.json = true,
+            "--user-dict" if !positional => {
+                options.user_dictionary = Some(
+                    args.next()
+                        .ok_or_else(|| usage("--user-dict requires a filename"))?
+                        .into(),
+                )
+            }
+            "--okuri" if !positional => {
+                options.okuri = Some(
+                    args.next()
+                        .ok_or_else(|| usage("--okuri requires a suffix"))?,
+                )
+            }
             "--katakana" if !positional => options.katakana = true,
             "--romaji" if !positional => {
                 options.romaji = Some(match args.next().as_deref() {
@@ -97,6 +116,14 @@ fn dictionaries(paths: &[PathBuf]) -> io::Result<Dictionary> {
         dictionary.extend(Dictionary::load(&path)?);
     }
     Ok(dictionary)
+}
+fn session(options: &Options) -> io::Result<Session> {
+    let engine = Engine::with_romaji_rule(Mode::Hiragana, options.romaji.unwrap_or_default());
+    let dictionary = dictionaries(&options.dictionaries)?;
+    match &options.user_dictionary {
+        Some(path) => Session::with_user_dictionary(engine, dictionary, path),
+        None => Ok(Session::new(engine, dictionary)),
+    }
 }
 fn kana(text: Option<&String>, script: Script, rule: RomajiRule) -> io::Result<()> {
     let mut converter = Converter::with_rule(script, rule);
@@ -134,7 +161,12 @@ fn run() -> io::Result<()> {
     let options = options(args[1..].iter().cloned())?;
     match command.as_str() {
         "kana" => {
-            if options.json || !options.dictionaries.is_empty() || options.words.len() > 1 {
+            if options.json
+                || !options.dictionaries.is_empty()
+                || options.user_dictionary.is_some()
+                || options.okuri.is_some()
+                || options.words.len() > 1
+            {
                 return Err(usage("usage: skk kana [--katakana] [TEXT]"));
             }
             kana(
@@ -147,9 +179,14 @@ fn run() -> io::Result<()> {
                 options.romaji.unwrap_or(RomajiRule::Common),
             )
         }
-        "convert" if !options.katakana && options.romaji.is_none() && options.words.len() == 1 => {
-            let dictionary = dictionaries(&options.dictionaries)?;
-            let candidates = dictionary.lookup(&options.words[0]);
+        "convert"
+            if !options.katakana
+                && options.romaji.is_none()
+                && options.okuri.is_none()
+                && options.words.len() == 1 =>
+        {
+            let session = session(&options)?;
+            let candidates = session.dictionary().lookup(&options.words[0]);
             let mut out = io::stdout().lock();
             if options.json {
                 serde_json::to_writer(&mut out, candidates)?;
@@ -165,6 +202,8 @@ fn run() -> io::Result<()> {
             if !options.katakana
                 && !options.json
                 && options.romaji.is_none()
+                && options.user_dictionary.is_none()
+                && options.okuri.is_none()
                 && options.dictionaries.is_empty()
                 && options.words.len() == 1 =>
         {
@@ -173,21 +212,41 @@ fn run() -> io::Result<()> {
             serde_json::to_writer(&mut out, &dictionary.stats())?;
             writeln!(out)
         }
-        "serve" if !options.json && !options.katakana && options.words == ["--stdio"] => {
-            protocol::serve_with_engine(
-                io::stdin().lock(),
-                io::stdout().lock(),
-                &dictionaries(&options.dictionaries)?,
-                Engine::with_romaji_rule(Mode::Hiragana, options.romaji.unwrap_or_default()),
-            )
+        "register"
+            if options.user_dictionary.is_some()
+                && !options.json
+                && !options.katakana
+                && options.romaji.is_none()
+                && options.dictionaries.is_empty()
+                && options.words.len() == 2 =>
+        {
+            let (user, _) = UserDictionary::open(options.user_dictionary.as_ref().unwrap())?;
+            user.record(&Confirmed {
+                dictionary_key: options.words[0].clone(),
+                candidate: Candidate {
+                    text: options.words[1].clone(),
+                    annotation: None,
+                },
+                okuri: options.okuri,
+            })
         }
-        "tui" if !options.json && !options.katakana && options.words.is_empty() => {
+        "serve"
+            if !options.json
+                && !options.katakana
+                && options.okuri.is_none()
+                && options.words == ["--stdio"] =>
+        {
+            protocol::serve_session(io::stdin().lock(), io::stdout().lock(), session(&options)?)
+        }
+        "tui"
+            if !options.json
+                && !options.katakana
+                && options.okuri.is_none()
+                && options.words.is_empty() =>
+        {
             #[cfg(all(unix, feature = "terminal"))]
             {
-                if let Some(text) = terminal::run(
-                    &dictionaries(&options.dictionaries)?,
-                    options.romaji.unwrap_or_default(),
-                )? {
+                if let Some(text) = terminal::run(session(&options)?)? {
                     io::stdout().lock().write_all(text.as_bytes())?;
                 }
                 Ok(())
@@ -198,7 +257,7 @@ fn run() -> io::Result<()> {
                 "tui requires Unix and the terminal feature",
             ))
         }
-        "convert" | "serve" | "tui" | "check-dict" => Err(usage(format!(
+        "convert" | "serve" | "tui" | "check-dict" | "register" => Err(usage(format!(
             "invalid arguments for {command}; see skk --help"
         ))),
         _ => Err(usage(format!("unknown command: {command}; see skk --help"))),

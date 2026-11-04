@@ -80,6 +80,36 @@ iconv -f EUC-JP -t UTF-8 SKK-JISYO.L > SKK-JISYO.L.utf8
 外部辞書は配布元のライセンスを確認してください。
 同梱のデモ辞書とコードは [MIT](LICENSE) です。
 
+## ユーザー辞書
+
+`--user-dict` で、単語登録と候補の学習先を明示できます。
+指定しなければ、辞書への書き込みや候補順の学習は行いません。
+
+```sh
+skk register --user-dict "$HOME/.local/share/sumi/user.skk" あたらしい 新しい語
+skk convert --user-dict "$HOME/.local/share/sumi/user.skk" あたらしい
+skk tui --user-dict "$HOME/.local/share/sumi/user.skk"
+skk serve --stdio --user-dict "$HOME/.local/share/sumi/user.skk"
+# 送り仮名付きの登録では、見出し語に送りキーを含め、語幹だけを登録する。
+skk register --user-dict user.skk --okuri る おくr 贈
+```
+
+ユーザー辞書はシステム辞書より優先します。
+候補を確定すると、その候補を先頭に移し、送り仮名があれば対応するブロックにも記録します。
+保存した内容は次のセッションでも使えます。
+端末 UI の全文キャンセルは出力を取り消しますが、それ以前に確定した候補の学習結果は残ります。
+
+保存時にはロックを取得し、最新のファイルを読み直してから、一時ファイルと rename で置き換えます。
+複数のセッションが同じファイルを使っても、保存前に他のセッションの更新を取り込みます。
+候補順はセッション開始時の辞書とそのセッション内の学習に基づき、他のセッションの更新を入力途中で自動反映はしません。
+既存のコメントは保存し、Unix の新規ファイルは所有者だけが読み書きできるモードで作成します。
+
+ロックが使用中なら待ち続けず、保存失敗を知らせます。
+確定文字列と、そのセッション内の候補順は保ちます。
+ロック用の `.lock` ファイルは残しますが、プロセス終了後に OS のロックは残りません。
+対応外の見出し語や式を含むファイルは書き換えないため、学習用には専用の辞書を使ってください。
+読み取り専用の既存辞書は `--dict` で利用できます。
+
 ## 対話入力
 
 `skk tui` は端末で日本語を入力し、完成した文字列を標準出力に返します。
@@ -144,6 +174,7 @@ skk serve --stdio
 [通信仕様](docs/protocol.md) に要求と応答の定義を記載しています。
 
 Rust からは `Engine::process_key(Key, &Dictionary) -> Update` を使えます。
+ファイル保存を伴う学習が必要な場合だけ `session::Session` で囲みます。
 かな変換だけなら `kana::Converter` を使い、入力の断片を順に渡せます。
 エンジンは画面表示や外部プロセスを操作しません。
 
@@ -154,7 +185,8 @@ Kakoune や tmux 向けの実験的な連携は、隣の独立リポジトリ `.
 ## 制約
 
 現時点では基本的なかな入力、送りなし変換、送り仮名付き変換に対応しています。
-ユーザー辞書への保存、学習、登録、abbrev、数値変換は未実装です。
+端末 UI 内での対話的な辞書登録、abbrev、数値変換は未実装です。
+単語登録は現時点では `skk register` で行います。
 
 エンジン、`serve`、`tui` は、標準 SKK と同じく `nn` を直ちに「ん」に確定します。
 「こんにちは」は `kon'nichiha` と入力できます。
@@ -190,6 +222,8 @@ cargo run --release --example latency -- /path/to/SKK-JISYO.L.utf8
 |`src/kana.rs`|辞書を使わない逐次かな変換|
 |`src/dictionary.rs`|UTF-8 辞書の読み込みと検索|
 |`src/protocol.rs`|stdio セッション|
+|`src/session.rs`|任意の候補学習を伴うセッション|
+|`src/user_dictionary.rs`|ユーザー辞書のロックと保存|
 |`src/main.rs`|CLI とフィルタ|
 |`src/terminal.rs`|単体の端末 UI|
 |`tests/`|エンジン、辞書、通信、CLI の自動テスト|

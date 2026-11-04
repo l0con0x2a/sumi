@@ -1,4 +1,4 @@
-use crate::{Engine, Key, dictionary::Dictionary};
+use crate::{Engine, Key, Update, dictionary::Dictionary, session::Session};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
@@ -39,36 +39,61 @@ impl Request {
         }
     }
 }
-// A process owns exactly one session. Invalid requests never change engine state.
-pub fn respond(engine: &mut Engine, dict: &Dictionary, line: &str) -> Value {
+fn parse(line: &str) -> Result<(Value, Action), Value> {
     let value: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => {
-            return json!({"id": null, "error": {"code":"invalid_json", "message":e.to_string()}});
+            return Err(
+                json!({"id": null, "error": {"code":"invalid_json", "message":e.to_string()}}),
+            );
         }
     };
     let id = value.get("id").cloned().unwrap_or(Value::Null);
     let req: Request = match serde_json::from_value(value) {
         Ok(r) => r,
         Err(e) => {
-            return json!({"id":id,"error":{"code":"invalid_request","message":e.to_string()}});
+            return Err(
+                json!({"id":id,"error":{"code":"invalid_request","message":e.to_string()}}),
+            );
         }
     };
     if !req.id.is_string() && !req.id.is_u64() {
-        return json!({"id":id,"error":{"code":"invalid_request","message":"id must be a string or unsigned integer"}});
+        return Err(
+            json!({"id":id,"error":{"code":"invalid_request","message":"id must be a string or unsigned integer"}}),
+        );
     }
-    let result = match req.action() {
-        Ok(Action::Key(key)) => engine.process_key(key, dict),
-        Ok(Action::State) => engine.snapshot(),
-        Ok(Action::Reset) => {
+    let action = req
+        .action()
+        .map_err(|(code, message)| json!({"id":id,"error":{"code":code,"message":message}}))?;
+    Ok((req.id, action))
+}
+fn execute(engine: &mut Engine, dict: &Dictionary, action: Action) -> Update {
+    match action {
+        Action::Key(key) => engine.process_key(key, dict),
+        Action::State => engine.snapshot(),
+        Action::Reset => {
             engine.reset();
             engine.snapshot()
         }
-        Ok(Action::Commit) => engine.commit(dict),
-        Ok(Action::Select(index)) => engine.select_candidate(index),
-        Err((code, message)) => return json!({"id":id,"error":{"code":code,"message":message}}),
-    };
-    json!({"id":req.id,"result":result})
+        Action::Commit => engine.commit(dict),
+        Action::Select(index) => engine.select_candidate(index),
+    }
+}
+// Invalid requests are fully checked before any input state changes.
+pub fn respond(engine: &mut Engine, dict: &Dictionary, line: &str) -> Value {
+    match parse(line) {
+        Ok((id, action)) => json!({"id":id,"result":execute(engine,dict,action)}),
+        Err(error) => error,
+    }
+}
+pub fn respond_session(session: &mut Session, line: &str) -> Value {
+    match parse(line) {
+        Ok((id, action)) => {
+            let update = execute(&mut session.engine, &session.dictionary, action);
+            json!({"id":id,"result":session.learn(update)})
+        }
+        Err(error) => error,
+    }
 }
 pub fn serve(input: impl BufRead, mut output: impl Write, dict: &Dictionary) -> io::Result<()> {
     serve_with_engine(input, &mut output, dict, Engine::default())
@@ -79,6 +104,21 @@ pub fn serve_with_engine(
     mut output: impl Write,
     dict: &Dictionary,
     mut engine: Engine,
+) -> io::Result<()> {
+    stream(input, &mut output, |line| respond(&mut engine, dict, line))
+}
+/// Run a session with optional user dictionary learning.
+pub fn serve_session(
+    input: impl BufRead,
+    output: impl Write,
+    mut session: Session,
+) -> io::Result<()> {
+    stream(input, output, |line| respond_session(&mut session, line))
+}
+fn stream(
+    input: impl BufRead,
+    mut output: impl Write,
+    mut respond: impl FnMut(&str) -> Value,
 ) -> io::Result<()> {
     // Bound each frame, including malformed input, to avoid unbounded allocation.
     let mut input = input;
@@ -113,7 +153,7 @@ pub fn serve_with_engine(
             json!({"id":null,"error":{"code":"frame_too_large","message":"maximum frame size is 65536 bytes"}})
         } else {
             match std::str::from_utf8(&frame) {
-                Ok(line) => respond(&mut engine, dict, line),
+                Ok(line) => respond(line),
                 Err(_) => {
                     json!({"id":null,"error":{"code":"invalid_utf8","message":"expected UTF-8"}})
                 }
