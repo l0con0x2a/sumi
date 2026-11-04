@@ -17,6 +17,7 @@ const HELP: &str = "skk — standalone SKK input and kana conversion
 Usage:
   skk kana [--katakana] [TEXT]
   skk convert [--json] [--dict FILE]... READING
+  skk check-dict FILE
   skk serve --stdio [--dict FILE]...
   skk tui [--dict FILE]...
   skk --help
@@ -24,6 +25,7 @@ Usage:
 
 kana:    Transliterate literal romaji; read UTF-8 stdin when TEXT is omitted.
 convert: Print dictionary candidates, one per line; --json includes annotations.
+check-dict: Validate a UTF-8 dictionary and print JSON counts for supported data.
 serve:   One stateful JSON Lines session on stdin/stdout.
 tui:     Compose text in a terminal; Ctrl-D sends, Esc/Ctrl-C cancels.
 
@@ -140,6 +142,17 @@ fn run() -> io::Result<()> {
                 Ok(())
             }
         }
+        "check-dict"
+            if !options.katakana
+                && !options.json
+                && options.dictionaries.is_empty()
+                && options.words.len() == 1 =>
+        {
+            let dictionary = Dictionary::load(&options.words[0])?;
+            let mut out = io::stdout().lock();
+            serde_json::to_writer(&mut out, &dictionary.stats())?;
+            writeln!(out)
+        }
         "serve" if !options.json && !options.katakana && options.words == ["--stdio"] => {
             protocol::serve(
                 io::stdin().lock(),
@@ -153,7 +166,7 @@ fn run() -> io::Result<()> {
             }
             Ok(())
         }
-        "convert" | "serve" | "tui" => Err(usage(format!(
+        "convert" | "serve" | "tui" | "check-dict" => Err(usage(format!(
             "invalid arguments for {command}; see skk --help"
         ))),
         _ => Err(usage(format!("unknown command: {command}; see skk --help"))),

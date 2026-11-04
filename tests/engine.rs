@@ -96,8 +96,8 @@ fn dictionary_annotations_duplicates_and_unsupported_entries() {
     .unwrap();
     assert_eq!(d.lookup("かんじ").len(), 2);
     assert_eq!(d.lookup("かんじ")[0].annotation.as_deref(), Some("説明"));
-    assert!(d.lookup("おくr").is_empty());
-    assert_eq!(d.lookup("え").len(), 1);
+    assert_eq!(d.lookup("おくr")[0].text, "送");
+    assert_eq!(d.lookup("え").len(), 2);
     assert!(Dictionary::parse("broken").is_err());
     assert!(Dictionary::parse("かな no-slashes").is_err());
 }

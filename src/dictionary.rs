@@ -1,3 +1,4 @@
+//! UTF-8 SKK dictionaries. Dictionary expressions are parsed as data, never run.
 use serde::Serialize;
 use std::{collections::HashMap, fs, io, path::Path};
 
@@ -6,10 +7,167 @@ pub struct Candidate {
     pub text: String,
     pub annotation: Option<String>,
 }
-
 #[derive(Default, Debug)]
-pub struct Dictionary(HashMap<String, Vec<Candidate>>);
+struct Entry {
+    candidates: Vec<Candidate>,
+    okuri: HashMap<String, Vec<Candidate>>,
+}
+#[derive(Default, Debug)]
+pub struct Dictionary {
+    entries: HashMap<String, Entry>,
+    skipped_entries: usize,
+    skipped_candidates: usize,
+}
+/// Counts include merged entries; skipped counts describe unsupported input.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Stats {
+    pub entries: usize,
+    pub candidates: usize,
+    pub okuri_blocks: usize,
+    pub skipped_entries: usize,
+    pub skipped_candidates: usize,
+}
+fn append_unique(target: &mut Vec<Candidate>, candidates: impl IntoIterator<Item = Candidate>) {
+    for candidate in candidates {
+        if !target.iter().any(|c| c.text == candidate.text) {
+            target.push(candidate);
+        }
+    }
+}
+fn supported_reading(reading: &str) -> bool {
+    let stem = if reading.ends_with(|c: char| c.is_ascii_lowercase()) {
+        &reading[..reading.len() - 1]
+    } else {
+        reading
+    };
+    !stem.is_empty() && stem.chars().all(|c| !c.is_ascii() && !c.is_control())
+}
 
+// Split only outside parenthesized expressions, including quoted slash/semicolon.
+fn split_outside(input: &str, delimiter: char) -> Result<Vec<&str>, String> {
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut start = 0;
+    let mut parts = Vec::new();
+    for (i, c) in input.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quoted && c == '\\' {
+            escaped = true;
+            continue;
+        }
+        if depth > 0 && c == '"' {
+            quoted = !quoted;
+            continue;
+        }
+        if quoted {
+            continue;
+        }
+        match c {
+            '(' if depth > 0
+                || (i == start && (delimiter == '/' || start == 0))
+                || (delimiter == '/'
+                    && input[..i].ends_with(';')
+                    && input[i..].starts_with("(concat")) =>
+            {
+                depth += 1
+            }
+            ')' if depth > 0 => depth -= 1,
+            c if c == delimiter && depth == 0 => {
+                parts.push(&input[start..i]);
+                start = i + c.len_utf8();
+            }
+            _ => (),
+        }
+    }
+    if depth > 0 || quoted {
+        return Err("unterminated dictionary expression".into());
+    }
+    parts.push(&input[start..]);
+    Ok(parts)
+}
+// Decode only the SKK concat representation, not arbitrary Lisp. Octal escapes
+// are bytes; validating the resulting UTF-8 also permits escaped Japanese text.
+fn text(input: &str) -> Option<String> {
+    if !input.starts_with('(') {
+        return Some(input.to_owned());
+    }
+    let mut rest = input.strip_prefix("(concat")?;
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let mut output = Vec::new();
+    loop {
+        rest = rest.trim_start();
+        if rest == ")" {
+            break;
+        }
+        rest = rest.strip_prefix('"')?;
+        let mut end = None;
+        let bytes = rest.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'"' => {
+                    end = Some(i + 1);
+                    break;
+                }
+                b'\\' => {
+                    i += 1;
+                    match *bytes.get(i)? {
+                        b'0'..=b'7' => {
+                            let mut value = 0u16;
+                            let mut count = 0;
+                            while count < 3
+                                && bytes.get(i).is_some_and(|b| (b'0'..=b'7').contains(b))
+                            {
+                                value = value * 8 + (bytes[i] - b'0') as u16;
+                                count += 1;
+                                i += 1;
+                            }
+                            output.push(u8::try_from(value).ok()?);
+                            continue;
+                        }
+                        b'"' | b'\\' => output.push(bytes[i]),
+                        _ => return None,
+                    }
+                }
+                byte => output.push(byte),
+            }
+            i += 1;
+        }
+        rest = &rest[end?..];
+    }
+    String::from_utf8(output).ok()
+}
+fn candidate(input: &str) -> Result<Option<Candidate>, String> {
+    let parts = split_outside(input, ';')?;
+    let Some(body) = text(parts[0]) else {
+        return Ok(None);
+    };
+    if body.is_empty() || body.chars().any(char::is_control) {
+        return Ok(None);
+    }
+    let annotation = if parts.len() > 1 {
+        // The first semicolon separates annotation; later semicolons are data.
+        let annotation = &input[parts[0].len() + 1..];
+        let annotation = if annotation.starts_with("(concat") {
+            text(annotation)
+        } else {
+            Some(annotation.to_owned())
+        };
+        annotation.filter(|s| !s.chars().any(char::is_control))
+    } else {
+        None
+    };
+    Ok(Some(Candidate {
+        text: body,
+        annotation,
+    }))
+}
 impl Dictionary {
     pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref();
@@ -26,58 +184,100 @@ impl Dictionary {
         Self::parse(include_str!("../data/demo.skk")).expect("valid bundled dictionary")
     }
     pub fn parse(input: &str) -> Result<Self, String> {
-        let mut dict = Self::default();
+        let mut dictionary = Self::default();
         for (line_no, line) in input.trim_start_matches('\u{feff}').lines().enumerate() {
             let line = line.trim();
             if line.is_empty() || line.starts_with(';') {
                 continue;
             }
-            let Some((reading, values)) = line.split_once(char::is_whitespace) else {
-                return Err(format!("line {}: missing candidate list", line_no + 1));
-            };
-            // Okuri keys, abbrev and numeric conversion are deliberately unsupported.
-            if reading.chars().any(|c| c.is_ascii()) {
+            let error = |message: &str| format!("line {}: {message}", line_no + 1);
+            let (reading, values) = line
+                .split_once(char::is_whitespace)
+                .ok_or_else(|| error("missing candidate list"))?;
+            if !supported_reading(reading) {
+                dictionary.skipped_entries += 1;
                 continue;
             }
             let values = values.trim();
-            if !values.starts_with('/') || !values.ends_with('/') {
-                return Err(format!("line {}: expected /candidate/.../", line_no + 1));
+            if values.len() < 2 || !values.starts_with('/') || !values.ends_with('/') {
+                return Err(error("expected /candidate/.../"));
             }
-            let entries = dict.0.entry(reading.to_owned()).or_default();
-            for value in values[1..values.len() - 1].split('/') {
-                // Never evaluate dictionary Lisp or expose okuri blocks as candidates.
-                if value.is_empty() || value.starts_with('[') || value.starts_with('(') {
+            let values = split_outside(&values[1..values.len() - 1], '/').map_err(|e| error(&e))?;
+            let entry = dictionary.entries.entry(reading.to_owned()).or_default();
+            let mut okuri: Option<String> = None;
+            for value in values {
+                if value.is_empty() {
                     continue;
                 }
-                let (text, annotation) = value
-                    .split_once(';')
-                    .map_or((value, None), |(t, a)| (t, Some(a.to_owned())));
-                if text.is_empty() || text.chars().any(char::is_control) {
+                if let Some(suffix) = value.strip_prefix('[') {
+                    if okuri.is_some() || suffix.is_empty() {
+                        return Err(error("invalid okuri block"));
+                    }
+                    okuri = Some(suffix.to_owned());
                     continue;
                 }
-                let candidate = Candidate {
-                    text: text.to_owned(),
-                    annotation,
+                if value == "]" {
+                    if okuri.take().is_none() {
+                        return Err(error("unexpected okuri block end"));
+                    }
+                    continue;
+                }
+                let Some(candidate) = candidate(value).map_err(|e| error(&e))? else {
+                    dictionary.skipped_candidates += 1;
+                    continue;
                 };
-                if !entries.iter().any(|c| c.text == text) {
-                    entries.push(candidate);
-                }
+                let target = match &okuri {
+                    Some(suffix) => entry.okuri.entry(suffix.clone()).or_default(),
+                    None => &mut entry.candidates,
+                };
+                append_unique(target, [candidate]);
+            }
+            if okuri.is_some() {
+                return Err(error("unterminated okuri block"));
             }
         }
-        Ok(dict)
+        Ok(dictionary)
     }
+    /// Return candidates in dictionary order, excluding okuri-specific hints.
     pub fn lookup(&self, reading: &str) -> &[Candidate] {
-        self.0.get(reading).map(Vec::as_slice).unwrap_or(&[])
+        self.entries
+            .get(reading)
+            .map(|e| e.candidates.as_slice())
+            .unwrap_or(&[])
     }
-    /// Merge a lower-priority dictionary, preserving order and the first annotation.
+    /// Prioritize a matching okuri block, followed by the general candidates.
+    /// Blocks for other suffixes never appear as candidates.
+    pub fn lookup_okuri(&self, reading: &str, suffix: &str) -> Vec<Candidate> {
+        let Some(entry) = self.entries.get(reading) else {
+            return Vec::new();
+        };
+        let mut result = entry.okuri.get(suffix).cloned().unwrap_or_default();
+        append_unique(&mut result, entry.candidates.iter().cloned());
+        result
+    }
+    /// Merge a lower-priority dictionary; preserve order and the first annotation.
     pub fn extend(&mut self, other: Self) {
-        for (reading, candidates) in other.0 {
-            let existing = self.0.entry(reading).or_default();
-            for candidate in candidates {
-                if !existing.iter().any(|c| c.text == candidate.text) {
-                    existing.push(candidate);
-                }
+        self.skipped_entries += other.skipped_entries;
+        self.skipped_candidates += other.skipped_candidates;
+        for (reading, source) in other.entries {
+            let entry = self.entries.entry(reading).or_default();
+            append_unique(&mut entry.candidates, source.candidates);
+            for (suffix, candidates) in source.okuri {
+                append_unique(entry.okuri.entry(suffix).or_default(), candidates);
             }
+        }
+    }
+    pub fn stats(&self) -> Stats {
+        Stats {
+            entries: self.entries.len(),
+            candidates: self
+                .entries
+                .values()
+                .map(|e| e.candidates.len() + e.okuri.values().map(Vec::len).sum::<usize>())
+                .sum(),
+            okuri_blocks: self.entries.values().map(|e| e.okuri.len()).sum(),
+            skipped_entries: self.skipped_entries,
+            skipped_candidates: self.skipped_candidates,
         }
     }
 }
