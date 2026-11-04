@@ -12,6 +12,14 @@ struct Entry {
     candidates: Vec<Candidate>,
     okuri: HashMap<String, Vec<Candidate>>,
 }
+impl Entry {
+    fn extend(&mut self, lower: Self) {
+        append_unique(&mut self.candidates, lower.candidates);
+        for (suffix, candidates) in lower.okuri {
+            append_unique(self.okuri.entry(suffix).or_default(), candidates);
+        }
+    }
+}
 #[derive(Default, Debug)]
 pub struct Dictionary {
     entries: HashMap<String, Entry>,
@@ -259,12 +267,24 @@ impl Dictionary {
     pub fn extend(&mut self, other: Self) {
         self.skipped_entries += other.skipped_entries;
         self.skipped_candidates += other.skipped_candidates;
+        if self.entries.is_empty() {
+            self.entries = other.entries;
+            return;
+        }
         for (reading, source) in other.entries {
             let entry = self.entries.entry(reading).or_default();
-            append_unique(&mut entry.candidates, source.candidates);
-            for (suffix, candidates) in source.okuri {
-                append_unique(entry.okuri.entry(suffix).or_default(), candidates);
-            }
+            entry.extend(source);
+        }
+    }
+    /// Overlay a higher-priority dictionary, visiting only its entries. This
+    /// avoids rebuilding a large system dictionary for a small user dictionary.
+    pub fn prepend(&mut self, higher: Self) {
+        self.skipped_entries += higher.skipped_entries;
+        self.skipped_candidates += higher.skipped_candidates;
+        for (reading, mut source) in higher.entries {
+            let entry = self.entries.entry(reading).or_default();
+            source.extend(std::mem::take(entry));
+            *entry = source;
         }
     }
     pub fn stats(&self) -> Stats {

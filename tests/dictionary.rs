@@ -68,3 +68,24 @@ fn annotation_parentheses_are_literal_text() {
         Some("≒腫れる (NB:未閉じ")
     );
 }
+
+#[test]
+fn high_priority_overlay_preserves_candidates_blocks_and_skipped_counts() {
+    let mut system = Dictionary::parse("おくr /送/贈/[る/送/]/\nabc /unsupported/\n").unwrap();
+    let higher = Dictionary::parse("おくr /贈;個人/[る/贈;送り/]/\nかな /仮名/\n").unwrap();
+    system.prepend(higher);
+    assert_eq!(
+        system.lookup("おくr")[0].annotation.as_deref(),
+        Some("個人")
+    );
+    assert_eq!(
+        system.lookup_okuri("おくr", "る")[0].annotation.as_deref(),
+        Some("送り")
+    );
+    assert_eq!(system.lookup_okuri("おくr", "る")[1].text, "送");
+    assert_eq!(system.stats().skipped_entries, 1);
+    let mut empty = Dictionary::parse("abc /unsupported/\n").unwrap();
+    empty.extend(system);
+    assert_eq!(empty.stats().skipped_entries, 2);
+    assert_eq!(empty.lookup("かな")[0].text, "仮名");
+}

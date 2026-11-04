@@ -25,8 +25,9 @@ impl Session {
         system: Dictionary,
         path: impl AsRef<Path>,
     ) -> io::Result<Self> {
-        let (user, mut dictionary) = UserDictionary::open(path)?;
-        dictionary.extend(system);
+        let (user, higher) = UserDictionary::open(path)?;
+        let mut dictionary = system;
+        dictionary.prepend(higher);
         Ok(Self {
             engine,
             dictionary,
