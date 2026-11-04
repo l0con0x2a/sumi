@@ -1,4 +1,5 @@
 pub mod dictionary;
+pub mod kana;
 pub mod protocol;
 mod romaji;
 

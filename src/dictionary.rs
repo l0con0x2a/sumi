@@ -12,15 +12,22 @@ pub struct Dictionary(HashMap<String, Vec<Candidate>>);
 
 impl Dictionary {
     pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
-        Self::parse(&fs::read_to_string(path)?)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        let path = path.as_ref();
+        let input = fs::read_to_string(path)
+            .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
+        Self::parse(&input).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{}: {e}", path.display()),
+            )
+        })
     }
     pub fn demo() -> Self {
         Self::parse(include_str!("../data/demo.skk")).expect("valid bundled dictionary")
     }
     pub fn parse(input: &str) -> Result<Self, String> {
         let mut dict = Self::default();
-        for (line_no, line) in input.lines().enumerate() {
+        for (line_no, line) in input.trim_start_matches('\u{feff}').lines().enumerate() {
             let line = line.trim();
             if line.is_empty() || line.starts_with(';') {
                 continue;
@@ -61,5 +68,16 @@ impl Dictionary {
     }
     pub fn lookup(&self, reading: &str) -> &[Candidate] {
         self.0.get(reading).map(Vec::as_slice).unwrap_or(&[])
+    }
+    /// Merge a lower-priority dictionary, preserving order and the first annotation.
+    pub fn extend(&mut self, other: Self) {
+        for (reading, candidates) in other.0 {
+            let existing = self.0.entry(reading).or_default();
+            for candidate in candidates {
+                if !existing.iter().any(|c| c.text == candidate.text) {
+                    existing.push(candidate);
+                }
+            }
+        }
     }
 }

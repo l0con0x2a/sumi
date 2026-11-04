@@ -1,5 +1,9 @@
 # 検証記録
 
+このページは初期 MVP の実測記録です。
+Kakoune と tmux の実装、および `tests/adapters.sh` は、その後 `../sumi-adapters` リポジトリへ分離しました。
+現在の本体のテストはエンジン、かな変換、辞書、stdio 通信、CLI を対象とします。
+
 2026-11-05 / Void Linux glibc x86_64 / Rust 1.99.1 / Kakoune 2026.05.21 / tmux 3.8。
 
 ## 自動検証
